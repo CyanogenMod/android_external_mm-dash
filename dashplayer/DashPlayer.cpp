@@ -198,7 +198,7 @@ void DashPlayer::setDataSource(const sp<IStreamSource> &source) {
     DP_MSG_ERROR("DashPlayer::setDataSource not Implemented...");
 }
 
-void DashPlayer::setDataSource(
+status_t DashPlayer::setDataSource(
         const char *url, const KeyedVector<String8, String8> *headers) {
     sp<AMessage> msg = new AMessage(kWhatSetDataSource, id());
 
@@ -212,10 +212,16 @@ void DashPlayer::setDataSource(
               mSourceType = kHttpDashSource;
               msg->setObject("source", source);
               msg->post();
+              return OK;
            } else {
              DP_MSG_ERROR("Error creating DASH source");
-             //return UNKNOWN_ERROR;
+             return UNKNOWN_ERROR;
            }
+    }
+    else
+    {
+      DP_MSG_ERROR("Unsupported URL");
+      return UNKNOWN_ERROR;
     }
 }
 
@@ -384,8 +390,10 @@ void DashPlayer::onMessageReceived(const sp<AMessage> &msg) {
             mVideoLateByUs = 0;
             mNumFramesTotal = 0;
             mNumFramesDropped = 0;
-
-            mSource->start();
+            if (mSource != NULL)
+            {
+              mSource->start();
+            }
 
             // for qualcomm statistics profiling
             mStats = new DashPlayerStats();
