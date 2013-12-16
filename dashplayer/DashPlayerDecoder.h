@@ -57,6 +57,7 @@ private:
 
     Vector<sp<ABuffer> > mCSD;
     size_t mCSDIndex;
+    int mLogLevel;
 
     sp<AMessage> makeFormat(const sp<MetaData> &meta);
 

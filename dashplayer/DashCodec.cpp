@@ -22,6 +22,7 @@
 #define LOG_TAG "DashCodec"
 
 #include "DashCodec.h"
+#include "QCMediaDefs.h"
 
 #include <binder/MemoryDealer.h>
 
@@ -50,6 +51,13 @@
 //Min resolution QVGA
 #define MIN_WIDTH 480;
 #define MIN_HEIGHT 320;
+
+#define DC_MSG_ERROR(...) ALOGE(__VA_ARGS__)
+#define DC_MSG_HIGH(...) if(mLogLevel >= 1){ALOGE(__VA_ARGS__);}
+#define DC_MSG_MEDIUM(...) if(mLogLevel >= 2){ALOGE(__VA_ARGS__);}
+#define DC_MSG_LOW(...) if(mLogLevel >= 3){ALOGE(__VA_ARGS__);}
+
+int mLogLevel = 0;
 
 namespace android {
 
@@ -398,6 +406,13 @@ DashCodec::DashCodec()
     mInputEOSResult = OK;
 
     changeState(mUninitializedState);
+
+    char property_value[PROPERTY_VALUE_MAX] = {0};
+    property_get("persist.dash.debug.level", property_value, NULL);
+
+    if(*property_value) {
+        mLogLevel = atoi(property_value);
+    }
 }
 
 DashCodec::~DashCodec() {
@@ -431,7 +446,7 @@ void DashCodec::initiateStart() {
 }
 
 void DashCodec::signalFlush() {
-    ALOGV("[%s] signalFlush", mComponentName.c_str());
+    DC_MSG_LOW("[%s] signalFlush", mComponentName.c_str());
     (new AMessage(kWhatFlush, id()))->post();
 }
 
@@ -467,7 +482,7 @@ status_t DashCodec::allocateBuffersOnPort(OMX_U32 portIndex) {
                 mNode, OMX_IndexParamPortDefinition, &def, sizeof(def));
 
         if (err == OK) {
-            ALOGV("[%s] Allocating %lu buffers of size %lu on %s port",
+            DC_MSG_HIGH("[%s] Allocating %lu buffers of size %lu on %s port",
                     mComponentName.c_str(),
                     def.nBufferCountActual, def.nBufferSize,
                     portIndex == kPortIndexInput ? "input" : "output");
@@ -554,7 +569,7 @@ status_t DashCodec::allocateOutputBuffersFromNativeWindow() {
             def.format.video.eColorFormat);
 
     if (err != 0) {
-        ALOGE("native_window_set_buffers_geometry failed: %s (%d)",
+        DC_MSG_ERROR("native_window_set_buffers_geometry failed: %s (%d)",
                 strerror(-err), -err);
         return err;
     }
@@ -563,7 +578,7 @@ status_t DashCodec::allocateOutputBuffersFromNativeWindow() {
     OMX_U32 usage = 0;
     err = mOMX->getGraphicBufferUsage(mNode, kPortIndexOutput, &usage);
     if (err != 0) {
-        ALOGW("querying usage flags from OMX IL component failed: %d", err);
+        DC_MSG_HIGH("querying usage flags from OMX IL component failed: %d", err);
         // XXX: Currently this error is logged, but not fatal.
         usage = 0;
     }
@@ -582,11 +597,11 @@ status_t DashCodec::allocateOutputBuffersFromNativeWindow() {
                 mNativeWindow.get(), NATIVE_WINDOW_QUEUES_TO_WINDOW_COMPOSER,
                 &queuesToNativeWindow);
         if (err != 0) {
-            ALOGE("error authenticating native window: %d", err);
+            DC_MSG_ERROR("error authenticating native window: %d", err);
             return err;
         }
         if (queuesToNativeWindow != 1) {
-            ALOGE("native window could not be authenticated");
+            DC_MSG_ERROR("native window could not be authenticated");
             return PERMISSION_DENIED;
         }
     }
@@ -596,7 +611,7 @@ status_t DashCodec::allocateOutputBuffersFromNativeWindow() {
             usage | GRALLOC_USAGE_HW_TEXTURE | GRALLOC_USAGE_EXTERNAL_DISP);
 
     if (err != 0) {
-        ALOGE("native_window_set_usage failed: %s (%d)", strerror(-err), -err);
+        DC_MSG_ERROR("native_window_set_usage failed: %s (%d)", strerror(-err), -err);
         return err;
     }
 
@@ -606,7 +621,7 @@ status_t DashCodec::allocateOutputBuffersFromNativeWindow() {
             &minUndequeuedBufs);
 
     if (err != 0) {
-        ALOGE("NATIVE_WINDOW_MIN_UNDEQUEUED_BUFFERS query failed: %s (%d)",
+        DC_MSG_ERROR("NATIVE_WINDOW_MIN_UNDEQUEUED_BUFFERS query failed: %s (%d)",
                 strerror(-err), -err);
         return err;
     }
@@ -617,17 +632,18 @@ status_t DashCodec::allocateOutputBuffersFromNativeWindow() {
     if (def.nBufferCountActual < def.nBufferCountMin + minUndequeuedBufs) {
         OMX_U32 newBufferCount = def.nBufferCountMin + minUndequeuedBufs;
         def.nBufferCountActual = newBufferCount;
-
+#ifdef ANDROID_JB_MR2
         //Keep an extra buffer for smooth streaming
         if (mSmoothStreaming) {
             def.nBufferCountActual += 1;
         }
+#endif
 
         err = mOMX->setParameter(
                 mNode, OMX_IndexParamPortDefinition, &def, sizeof(def));
 
         if (err != OK) {
-            ALOGE("[%s] setting nBufferCountActual to %lu failed: %d",
+            DC_MSG_ERROR("[%s] setting nBufferCountActual to %lu failed: %d",
                     mComponentName.c_str(), newBufferCount, err);
             return err;
         }
@@ -638,12 +654,12 @@ status_t DashCodec::allocateOutputBuffersFromNativeWindow() {
             mNativeWindow.get(), def.nBufferCountActual);
 
     if (err != 0) {
-        ALOGE("native_window_set_buffer_count failed: %s (%d)", strerror(-err),
+        DC_MSG_ERROR("native_window_set_buffer_count failed: %s (%d)", strerror(-err),
                 -err);
         return err;
     }
 
-    ALOGV("[%s] Allocating %lu buffers from a native window of size %lu on "
+    DC_MSG_HIGH("[%s] Allocating %lu buffers from a native window of size %lu on "
          "output port",
          mComponentName.c_str(), def.nBufferCountActual, def.nBufferSize);
 
@@ -652,7 +668,7 @@ status_t DashCodec::allocateOutputBuffersFromNativeWindow() {
         ANativeWindowBuffer *buf;
         err = native_window_dequeue_buffer_and_wait(mNativeWindow.get(), &buf);
         if (err != 0) {
-            ALOGE("dequeueBuffer failed: %s (%d)", strerror(-err), -err);
+            DC_MSG_ERROR("dequeueBuffer failed: %s (%d)", strerror(-err), -err);
             break;
         }
 
@@ -667,14 +683,14 @@ status_t DashCodec::allocateOutputBuffersFromNativeWindow() {
         err = mOMX->useGraphicBuffer(mNode, kPortIndexOutput, graphicBuffer,
                 &bufferId);
         if (err != 0) {
-            ALOGE("registering GraphicBuffer %lu with OMX IL component failed: "
+            DC_MSG_ERROR("registering GraphicBuffer %lu with OMX IL component failed: "
                  "%d", i, err);
             break;
         }
 
         mBuffers[kPortIndexOutput].editItemAt(i).mBufferID = bufferId;
 
-        ALOGV("[%s] Registered graphic buffer with ID %p (pointer = %p)",
+        DC_MSG_LOW("[%s] Registered graphic buffer with ID %p (pointer = %p)",
              mComponentName.c_str(),
              bufferId, graphicBuffer.get());
     }
@@ -704,7 +720,7 @@ status_t DashCodec::allocateOutputBuffersFromNativeWindow() {
 status_t DashCodec::cancelBufferToNativeWindow(BufferInfo *info) {
     CHECK_EQ((int)info->mStatus, (int)BufferInfo::OWNED_BY_US);
 
-    ALOGV("[%s] Calling cancelBuffer on buffer %p",
+    DC_MSG_LOW("[%s] Calling cancelBuffer on buffer %p",
          mComponentName.c_str(), info->mBufferID);
 
     int err = mNativeWindow->cancelBuffer(
@@ -721,7 +737,7 @@ DashCodec::BufferInfo *DashCodec::dequeueBufferFromNativeWindow() {
     ANativeWindowBuffer *buf;
     int fenceFd = -1;
     if (native_window_dequeue_buffer_and_wait(mNativeWindow.get(), &buf) != 0) {
-        ALOGE("dequeueBuffer failed.");
+        DC_MSG_ERROR("dequeueBuffer failed.");
         return NULL;
     }
 
@@ -847,12 +863,12 @@ status_t DashCodec::setComponentRole(
             "video_decoder.mpeg4", "video_encoder.mpeg4" },
         { MEDIA_MIMETYPE_VIDEO_H263,
             "video_decoder.h263", "video_encoder.h263" },
-        { MEDIA_MIMETYPE_VIDEO_VPX,
-            "video_decoder.vpx", "video_encoder.vpx" },
         { MEDIA_MIMETYPE_AUDIO_RAW,
             "audio_decoder.raw", "audio_encoder.raw" },
         { MEDIA_MIMETYPE_AUDIO_FLAC,
             "audio_decoder.flac", "audio_encoder.flac" },
+        { MEDIA_MIMETYPE_VIDEO_HEVC,
+            "video_decoder.hevc", "video_encoder.hevc" },
     };
 
     static const size_t kNumMimeToRole =
@@ -887,7 +903,7 @@ status_t DashCodec::setComponentRole(
                 &roleParams, sizeof(roleParams));
 
         if (err != OK) {
-            ALOGW("[%s] Failed to set standard component role '%s'.",
+            DC_MSG_HIGH("[%s] Failed to set standard component role '%s'.",
                  mComponentName.c_str(), role);
 
             return err;
@@ -926,7 +942,7 @@ status_t DashCodec::configureCodec(
         err = mOMX->storeMetaDataInBuffers(mNode, kPortIndexInput, OMX_TRUE);
 
         if (err != OK) {
-            ALOGE("[%s] storeMetaDataInBuffers failed w/ err %d",
+            DC_MSG_ERROR("[%s] storeMetaDataInBuffers failed w/ err %d",
                   mComponentName.c_str(), err);
 
             return err;
@@ -953,14 +969,75 @@ status_t DashCodec::configureCodec(
         }
 
         if (err != OK) {
-            ALOGE("Encoder could not be configured to emit SPS/PPS before "
+            DC_MSG_ERROR("Encoder could not be configured to emit SPS/PPS before "
                   "IDR frames. (err %d)", err);
 
             return err;
         }
     }
 
-    if (!strncasecmp(mime, "video/", 6)) {
+    // Always try to enable dynamic output buffers on native surface
+    int32_t video = !strncasecmp(mime, "video/", 6);
+#ifndef ANDROID_JB_MR2
+      sp<RefBase> obj;
+      int32_t haveNativeWindow = msg->findObject("native-window", &obj) &&
+            obj != NULL;
+      if (!encoder && video && haveNativeWindow) {
+        //err = mOMX->storeMetaDataInBuffers(mNode, kPortIndexOutput, OMX_TRUE);
+        err = INVALID_OPERATION;
+        if (err != OK) {
+
+            DC_MSG_ERROR("[%s] storeMetaDataInBuffers failed w/ err %d",
+                  mComponentName.c_str(), err);
+
+            // if adaptive playback has been requested, try JB fallback
+            // NOTE: THIS FALLBACK MECHANISM WILL BE REMOVED DUE TO ITS
+            // LARGE MEMORY REQUIREMENT
+
+            // we will not do adaptive playback on software accessed
+            // surfaces as they never had to respond to changes in the
+            // crop window, and we don't trust that they will be able to.
+            int usageBits = 0;
+            bool canDoAdaptivePlayback;
+
+            sp<NativeWindowWrapper> windowWrapper(
+                    static_cast<NativeWindowWrapper *>(obj.get()));
+            sp<ANativeWindow> nativeWindow = windowWrapper->getNativeWindow();
+
+            if (nativeWindow->query(
+                    nativeWindow.get(),
+                    NATIVE_WINDOW_CONSUMER_USAGE_BITS,
+                    &usageBits) != OK) {
+                canDoAdaptivePlayback = false;
+            } else {
+                canDoAdaptivePlayback =
+                    (usageBits &
+                            (GRALLOC_USAGE_SW_READ_MASK |
+                             GRALLOC_USAGE_SW_WRITE_MASK)) == 0;
+            }
+
+            int32_t maxWidth = 0, maxHeight = 0;
+            if (canDoAdaptivePlayback &&
+                msg->findInt32("max-width", &maxWidth) &&
+                msg->findInt32("max-height", &maxHeight)) {
+                DC_MSG_ERROR("[%s] prepareForAdaptivePlayback(%d%d)",
+                      mComponentName.c_str(), maxWidth, maxHeight);
+
+                err = mOMX->prepareForAdaptivePlayback(
+                        mNode, kPortIndexOutput, OMX_TRUE, maxWidth, maxHeight);
+                if(err != OK) {
+                  DC_MSG_ERROR("[%s] prepareForAdaptivePlayback failed w/ err %d",
+                        mComponentName.c_str(), err);
+                }
+            }
+            // allow failure
+            err = OK;
+        } else {
+            DC_MSG_MEDIUM("[%s] storeMetaDataInBuffers succeeded", mComponentName.c_str());
+        }
+      }
+#endif
+    if (video) {
         if (encoder) {
             err = setupVideoEncoder(mime, msg);
         } else {
@@ -970,10 +1047,12 @@ status_t DashCodec::configureCodec(
                 err = INVALID_OPERATION;
             } else {
                 //override height & width with max for smooth streaming
+#ifdef ANDROID_JB_MR2
                 if (mSmoothStreaming) {
                     width = MAX_WIDTH;
                     height = MAX_HEIGHT;
                 }
+#endif
                 err = setupVideoDecoder(mime, width, height);
             }
         }
@@ -1014,17 +1093,17 @@ status_t DashCodec::configureCodec(
         if (encoder &&
                 (!msg->findInt32("channel-count", &numChannels)
                         || !msg->findInt32("sample-rate", &sampleRate))) {
-            ALOGE("missing channel count or sample rate for FLAC encoder");
+            DC_MSG_ERROR("missing channel count or sample rate for FLAC encoder");
             err = INVALID_OPERATION;
         } else {
             if (encoder) {
                 if (!msg->findInt32("flac-compression-level", &compressionLevel)) {
                     compressionLevel = 5;// default FLAC compression level
                 } else if (compressionLevel < 0) {
-                    ALOGW("compression level %d outside [0..8] range, using 0", compressionLevel);
+                    DC_MSG_HIGH("compression level %d outside [0..8] range, using 0", compressionLevel);
                     compressionLevel = 0;
                 } else if (compressionLevel > 8) {
-                    ALOGW("compression level %d outside [0..8] range, using 8", compressionLevel);
+                    DC_MSG_HIGH("compression level %d outside [0..8] range, using 8", compressionLevel);
                     compressionLevel = 8;
                 }
             }
@@ -1322,13 +1401,13 @@ status_t DashCodec::setupFlacCodec(
         // configure compression level
         status_t err = mOMX->getParameter(mNode, OMX_IndexParamAudioFlac, &def, sizeof(def));
         if (err != OK) {
-            ALOGE("setupFlacCodec(): Error %d getting OMX_IndexParamAudioFlac parameter", err);
+            DC_MSG_ERROR("setupFlacCodec(): Error %d getting OMX_IndexParamAudioFlac parameter", err);
             return err;
         }
         def.nCompressionLevel = compressionLevel;
         err = mOMX->setParameter(mNode, OMX_IndexParamAudioFlac, &def, sizeof(def));
         if (err != OK) {
-            ALOGE("setupFlacCodec(): Error %d setting OMX_IndexParamAudioFlac parameter", err);
+            DC_MSG_ERROR("setupFlacCodec(): Error %d setting OMX_IndexParamAudioFlac parameter", err);
             return err;
         }
     }
@@ -1482,8 +1561,8 @@ static status_t GetVideoCodingTypeFromMime(
         *codingType = OMX_VIDEO_CodingH263;
     } else if (!strcasecmp(MEDIA_MIMETYPE_VIDEO_MPEG2, mime)) {
         *codingType = OMX_VIDEO_CodingMPEG2;
-    } else if (!strcasecmp(MEDIA_MIMETYPE_VIDEO_VPX, mime)) {
-        *codingType = OMX_VIDEO_CodingVPX;
+    } else if (!strcasecmp(MEDIA_MIMETYPE_VIDEO_HEVC, mime)) {
+        *codingType = (OMX_VIDEO_CODINGTYPE)QOMX_VIDEO_CodingHevc;
     } else {
         *codingType = OMX_VIDEO_CodingUnused;
         return ERROR_UNSUPPORTED;
@@ -1544,7 +1623,7 @@ status_t DashCodec::setupVideoEncoder(const char *mime, const sp<AMessage> &msg)
             kPortIndexInput, OMX_VIDEO_CodingUnused, colorFormat);
 
     if (err != OK) {
-        ALOGE("[%s] does not support color format %d",
+        DC_MSG_ERROR("[%s] does not support color format %d",
               mComponentName.c_str(), colorFormat);
 
         return err;
@@ -1609,7 +1688,7 @@ status_t DashCodec::setupVideoEncoder(const char *mime, const sp<AMessage> &msg)
             mNode, OMX_IndexParamPortDefinition, &def, sizeof(def));
 
     if (err != OK) {
-        ALOGE("[%s] failed to set input port definition parameters.",
+        DC_MSG_ERROR("[%s] failed to set input port definition parameters.",
               mComponentName.c_str());
 
         return err;
@@ -1628,7 +1707,7 @@ status_t DashCodec::setupVideoEncoder(const char *mime, const sp<AMessage> &msg)
             kPortIndexOutput, compressionFormat, OMX_COLOR_FormatUnused);
 
     if (err != OK) {
-        ALOGE("[%s] does not support compression format %d",
+        DC_MSG_ERROR("[%s] does not support compression format %d",
              mComponentName.c_str(), compressionFormat);
 
         return err;
@@ -1654,7 +1733,7 @@ status_t DashCodec::setupVideoEncoder(const char *mime, const sp<AMessage> &msg)
             mNode, OMX_IndexParamPortDefinition, &def, sizeof(def));
 
     if (err != OK) {
-        ALOGE("[%s] failed to set output port definition parameters.",
+        DC_MSG_ERROR("[%s] failed to set output port definition parameters.",
               mComponentName.c_str());
 
         return err;
@@ -1677,7 +1756,7 @@ status_t DashCodec::setupVideoEncoder(const char *mime, const sp<AMessage> &msg)
             break;
     }
 
-    ALOGI("setupVideoEncoder succeeded");
+    DC_MSG_HIGH("setupVideoEncoder succeeded");
 
     return err;
 }
@@ -1910,7 +1989,7 @@ status_t DashCodec::setupAVCEncoderParameters(const sp<AMessage> &msg) {
 
     // XXX
     if (h264type.eProfile != OMX_VIDEO_AVCProfileBaseline) {
-        ALOGW("Use baseline profile instead of %d for AVC recording",
+        DC_MSG_HIGH("Use baseline profile instead of %d for AVC recording",
             h264type.eProfile);
         h264type.eProfile = OMX_VIDEO_AVCProfileBaseline;
     }
@@ -2096,7 +2175,7 @@ bool DashCodec::allYourBuffersAreBelongToUs(
 
         if (info->mStatus != BufferInfo::OWNED_BY_US
                 && info->mStatus != BufferInfo::OWNED_BY_NATIVE_WINDOW) {
-            ALOGV("[%s] Buffer %p on port %ld still has status %d",
+            DC_MSG_LOW("[%s] Buffer %p on port %ld still has status %d",
                     mComponentName.c_str(),
                     info->mBufferID, portIndex, info->mStatus);
             return false;
@@ -2198,7 +2277,7 @@ void DashCodec::sendFormatChange() {
             notify->setInt32("stride", videoDef->nStride);
             notify->setInt32("slice-height", videoDef->nSliceHeight);
             notify->setInt32("color-format", videoDef->eColorFormat);
-            ALOGE("sendformatchange: %d %d", videoDef->nFrameWidth, videoDef->nFrameHeight);
+            DC_MSG_HIGH("sendformatchange: %lu %lu", videoDef->nFrameWidth, videoDef->nFrameHeight);
             OMX_CONFIG_RECTTYPE* rect;
             bool hasValidCrop = true;
             if (useCachedConfig) {
@@ -2231,17 +2310,19 @@ void DashCodec::sendFormatChange() {
             CHECK_LE(rect->nLeft + rect->nWidth - 1, videoDef->nFrameWidth);
             CHECK_LE(rect->nTop + rect->nHeight - 1, videoDef->nFrameHeight);
 
+#ifdef ANDROID_JB_MR2
             if( mSmoothStreaming ) {
                //call Update buffer geometry here
-                ALOGE("Calling native window update buffer geometry");
+                DC_MSG_HIGH("Calling native window update buffer geometry");
                 status_t err = mNativeWindow.get()->perform(mNativeWindow.get(),
                                          NATIVE_WINDOW_UPDATE_BUFFERS_GEOMETRY,
                                          videoDef->nFrameWidth, videoDef->nFrameHeight, def->format.video.eColorFormat);
                if( err != OK ) {
-                   ALOGE("native_window_update_buffers_geometry failed in SS mode %d", err);
+                   DC_MSG_ERROR("native_window_update_buffers_geometry failed in SS mode %d", err);
                }
 
            }
+#endif
 
             notify->setRect(
                     "crop",
@@ -2291,7 +2372,7 @@ void DashCodec::sendFormatChange() {
                 if (mSkipCutBuffer != NULL) {
                     size_t prevbufsize = mSkipCutBuffer->size();
                     if (prevbufsize != 0) {
-                        ALOGW("Replacing SkipCutBuffer holding %d bytes", prevbufsize);
+                        DC_MSG_HIGH("Replacing SkipCutBuffer holding %d bytes", prevbufsize);
                     }
                 }
                 mSkipCutBuffer = new SkipCutBuffer(mEncoderDelay * frameSize,
@@ -2317,11 +2398,11 @@ void DashCodec::sendFormatChange() {
 status_t DashCodec::InitSmoothStreaming() {
      status_t err = mOMX->setParameter(mNode, (OMX_INDEXTYPE)OMX_QcomIndexParamEnableSmoothStreaming,&err, sizeof(int32_t));
     if (err != OMX_ErrorNone) {
-        ALOGE("InitSmoothStreaming setParam failed for extradata");
+        DC_MSG_ERROR("InitSmoothStreaming setParam failed for extradata");
         return err;
     }
 
-    ALOGW("InitSmoothStreaming - Smooth streaming mode enabled");
+    DC_MSG_HIGH("InitSmoothStreaming - Smooth streaming mode enabled");
 
     return OK;
 }
@@ -2346,7 +2427,7 @@ status_t DashCodec::pushBlankBuffersToNativeWindow() {
     err = native_window_api_disconnect(mNativeWindow.get(),
             NATIVE_WINDOW_API_MEDIA);
     if (err != NO_ERROR) {
-        ALOGE("error pushing blank frames: api_disconnect failed: %s (%d)",
+        DC_MSG_ERROR("error pushing blank frames: api_disconnect failed: %s (%d)",
                 strerror(-err), -err);
         return err;
     }
@@ -2354,7 +2435,7 @@ status_t DashCodec::pushBlankBuffersToNativeWindow() {
     err = native_window_api_connect(mNativeWindow.get(),
             NATIVE_WINDOW_API_CPU);
     if (err != NO_ERROR) {
-        ALOGE("error pushing blank frames: api_connect failed: %s (%d)",
+        DC_MSG_ERROR("error pushing blank frames: api_connect failed: %s (%d)",
                 strerror(-err), -err);
         return err;
     }
@@ -2362,7 +2443,7 @@ status_t DashCodec::pushBlankBuffersToNativeWindow() {
     err = native_window_set_buffers_geometry(mNativeWindow.get(), 1, 1,
             HAL_PIXEL_FORMAT_RGBX_8888);
     if (err != NO_ERROR) {
-        ALOGE("error pushing blank frames: set_buffers_geometry failed: %s (%d)",
+        DC_MSG_ERROR("error pushing blank frames: set_buffers_geometry failed: %s (%d)",
                 strerror(-err), -err);
         goto error;
     }
@@ -2370,7 +2451,7 @@ status_t DashCodec::pushBlankBuffersToNativeWindow() {
     err = native_window_set_usage(mNativeWindow.get(),
             GRALLOC_USAGE_SW_WRITE_OFTEN);
     if (err != NO_ERROR) {
-        ALOGE("error pushing blank frames: set_usage failed: %s (%d)",
+        DC_MSG_ERROR("error pushing blank frames: set_usage failed: %s (%d)",
                 strerror(-err), -err);
         goto error;
     }
@@ -2378,7 +2459,7 @@ status_t DashCodec::pushBlankBuffersToNativeWindow() {
     err = mNativeWindow->query(mNativeWindow.get(),
             NATIVE_WINDOW_MIN_UNDEQUEUED_BUFFERS, &minUndequeuedBufs);
     if (err != NO_ERROR) {
-        ALOGE("error pushing blank frames: MIN_UNDEQUEUED_BUFFERS query "
+        DC_MSG_ERROR("error pushing blank frames: MIN_UNDEQUEUED_BUFFERS query "
                 "failed: %s (%d)", strerror(-err), -err);
         goto error;
     }
@@ -2386,7 +2467,7 @@ status_t DashCodec::pushBlankBuffersToNativeWindow() {
     numBufs = minUndequeuedBufs + 1;
     err = native_window_set_buffer_count(mNativeWindow.get(), numBufs);
     if (err != NO_ERROR) {
-        ALOGE("error pushing blank frames: set_buffer_count failed: %s (%d)",
+        DC_MSG_ERROR("error pushing blank frames: set_buffer_count failed: %s (%d)",
                 strerror(-err), -err);
         goto error;
     }
@@ -2399,7 +2480,7 @@ status_t DashCodec::pushBlankBuffersToNativeWindow() {
         int fenceFd = -1;
         err = native_window_dequeue_buffer_and_wait(mNativeWindow.get(), &anb);
         if (err != NO_ERROR) {
-            ALOGE("error pushing blank frames: dequeueBuffer failed: %s (%d)",
+            DC_MSG_ERROR("error pushing blank frames: dequeueBuffer failed: %s (%d)",
                     strerror(-err), -err);
             goto error;
         }
@@ -2410,7 +2491,7 @@ status_t DashCodec::pushBlankBuffersToNativeWindow() {
         uint32_t* img = NULL;
         err = buf->lock(GRALLOC_USAGE_SW_WRITE_OFTEN, (void**)(&img));
         if (err != NO_ERROR) {
-            ALOGE("error pushing blank frames: lock failed: %s (%d)",
+            DC_MSG_ERROR("error pushing blank frames: lock failed: %s (%d)",
                     strerror(-err), -err);
             goto error;
         }
@@ -2419,7 +2500,7 @@ status_t DashCodec::pushBlankBuffersToNativeWindow() {
 
         err = buf->unlock();
         if (err != NO_ERROR) {
-            ALOGE("error pushing blank frames: unlock failed: %s (%d)",
+            DC_MSG_ERROR("error pushing blank frames: unlock failed: %s (%d)",
                     strerror(-err), -err);
             goto error;
         }
@@ -2427,7 +2508,7 @@ status_t DashCodec::pushBlankBuffersToNativeWindow() {
         err = mNativeWindow->queueBuffer(mNativeWindow.get(),
                 buf->getNativeBuffer(), -1);
         if (err != NO_ERROR) {
-            ALOGE("error pushing blank frames: queueBuffer failed: %s (%d)",
+            DC_MSG_ERROR("error pushing blank frames: queueBuffer failed: %s (%d)",
                     strerror(-err), -err);
             goto error;
         }
@@ -2454,7 +2535,7 @@ error:
         err = native_window_api_disconnect(mNativeWindow.get(),
                 NATIVE_WINDOW_API_CPU);
         if (err != NO_ERROR) {
-            ALOGE("error pushing blank frames: api_disconnect failed: %s (%d)",
+            DC_MSG_ERROR("error pushing blank frames: api_disconnect failed: %s (%d)",
                     strerror(-err), -err);
             return err;
         }
@@ -2462,7 +2543,7 @@ error:
         err = native_window_api_connect(mNativeWindow.get(),
                 NATIVE_WINDOW_API_MEDIA);
         if (err != NO_ERROR) {
-            ALOGE("error pushing blank frames: api_connect failed: %s (%d)",
+            DC_MSG_ERROR("error pushing blank frames: api_connect failed: %s (%d)",
                     strerror(-err), -err);
             return err;
         }
@@ -2633,13 +2714,13 @@ bool DashCodec::BaseState::onOMXMessage(const sp<AMessage> &msg) {
 bool DashCodec::BaseState::onOMXEvent(
         OMX_EVENTTYPE event, OMX_U32 data1, OMX_U32 data2) {
     if (event != OMX_EventError) {
-        ALOGV("[%s] EVENT(%d, 0x%08lx, 0x%08lx)",
+        DC_MSG_LOW("[%s] EVENT(%d, 0x%08lx, 0x%08lx)",
              mCodec->mComponentName.c_str(), event, data1, data2);
 
         return false;
     }
 
-    ALOGE("[%s] ERROR(0x%08lx)", mCodec->mComponentName.c_str(), data1);
+    DC_MSG_ERROR("[%s] ERROR(0x%08lx)", mCodec->mComponentName.c_str(), data1);
 
     mCodec->signalError((OMX_ERRORTYPE)data1);
 
@@ -2647,7 +2728,7 @@ bool DashCodec::BaseState::onOMXEvent(
 }
 
 bool DashCodec::BaseState::onOMXEmptyBufferDone(IOMX::buffer_id bufferID) {
-    ALOGV("[%s] onOMXEmptyBufferDone %p",
+    DC_MSG_HIGH("[%s] onOMXEmptyBufferDone %p",
          mCodec->mComponentName.c_str(), bufferID);
 
     BufferInfo *info =
@@ -2666,7 +2747,7 @@ bool DashCodec::BaseState::onOMXEmptyBufferDone(IOMX::buffer_id bufferID) {
         // told us that it's done with the input buffer, we can decrement
         // the mediaBuffer's reference count.
 
-        ALOGV("releasing mbuf %p", mediaBuffer);
+        DC_MSG_LOW("releasing mbuf %p", mediaBuffer);
 
         ((MediaBuffer *)mediaBuffer)->release();
         mediaBuffer = NULL;
@@ -2730,7 +2811,7 @@ void DashCodec::BaseState::onInputBufferFilled(const sp<AMessage> &msg) {
     if (!msg->findBuffer("buffer", &buffer)) {
         CHECK(msg->findInt32("err", &err));
 
-        ALOGV("[%s] saw error %d instead of an input buffer",
+        DC_MSG_LOW("[%s] saw error %d instead of an input buffer",
              mCodec->mComponentName.c_str(), err);
 
         buffer.clear();
@@ -2781,7 +2862,7 @@ void DashCodec::BaseState::onInputBufferFilled(const sp<AMessage> &msg) {
                 }
 
                 if (buffer != info->mData) {
-                    ALOGV("[%s] Needs to copy input data for buffer %p. (%p != %p)",
+                    DC_MSG_LOW("[%s] Needs to copy input data for buffer %p. (%p != %p)",
                          mCodec->mComponentName.c_str(),
                          bufferID,
                          buffer.get(), info->mData.get());
@@ -2791,17 +2872,17 @@ void DashCodec::BaseState::onInputBufferFilled(const sp<AMessage> &msg) {
                 }
 
                 if (flags & OMX_BUFFERFLAG_CODECCONFIG) {
-                    ALOGV("[%s] calling emptyBuffer %p w/ codec specific data",
+                    DC_MSG_HIGH("[%s] calling emptyBuffer %p w/ codec specific data",
                          mCodec->mComponentName.c_str(), bufferID);
                 } else if (flags & OMX_BUFFERFLAG_EOS) {
-                    ALOGV("[%s] calling emptyBuffer %p w/ EOS",
+                    DC_MSG_HIGH("[%s] calling emptyBuffer %p w/ EOS",
                          mCodec->mComponentName.c_str(), bufferID);
                 } else {
 #if TRACK_BUFFER_TIMING
-                    ALOGI("[%s] calling emptyBuffer %p w/ time %lld us",
+                    DC_MSG_HIGH("[%s] calling emptyBuffer %p w/ time %lld us",
                          mCodec->mComponentName.c_str(), bufferID, timeUs);
 #else
-                    ALOGV("[%s] calling emptyBuffer %p w/ time %lld us",
+                    DC_MSG_HIGH("[%s] calling emptyBuffer %p w/ time %lld us",
                          mCodec->mComponentName.c_str(), bufferID, timeUs);
 #endif
                 }
@@ -2827,7 +2908,7 @@ void DashCodec::BaseState::onInputBufferFilled(const sp<AMessage> &msg) {
                 if (!eos) {
                     getMoreInputDataIfPossible();
                 } else {
-                    ALOGV("[%s] Signalled EOS on the input port",
+                    DC_MSG_LOW("[%s] Signalled EOS on the input port",
                          mCodec->mComponentName.c_str());
 
                     mCodec->mPortEOS[kPortIndexInput] = true;
@@ -2835,15 +2916,15 @@ void DashCodec::BaseState::onInputBufferFilled(const sp<AMessage> &msg) {
                 }
             } else if (!mCodec->mPortEOS[kPortIndexInput]) {
                 if (err != ERROR_END_OF_STREAM) {
-                    ALOGV("[%s] Signalling EOS on the input port "
+                    DC_MSG_LOW("[%s] Signalling EOS on the input port "
                          "due to error %d",
                          mCodec->mComponentName.c_str(), err);
                 } else {
-                    ALOGV("[%s] Signalling EOS on the input port",
+                    DC_MSG_LOW("[%s] Signalling EOS on the input port",
                          mCodec->mComponentName.c_str());
                 }
 
-                ALOGV("[%s] calling emptyBuffer %p signalling EOS",
+                DC_MSG_HIGH("[%s] calling emptyBuffer %p signalling EOS",
                      mCodec->mComponentName.c_str(), bufferID);
 
                 CHECK_EQ(mCodec->mOMX->emptyBuffer(
@@ -2905,7 +2986,7 @@ bool DashCodec::BaseState::onOMXFillBufferDone(
         int64_t timeUs,
         void *platformPrivate,
         void *dataPtr) {
-    ALOGV("[%s] onOMXFillBufferDone %p time %lld us, flags = 0x%08lx",
+    DC_MSG_HIGH("[%s] onOMXFillBufferDone %p time %lld us, flags = 0x%08lx",
          mCodec->mComponentName.c_str(), bufferID, timeUs, flags);
 
     ssize_t index;
@@ -2916,7 +2997,7 @@ bool DashCodec::BaseState::onOMXFillBufferDone(
         DashCodec::BufferStats *stats = &mCodec->mBufferStats.editValueAt(index);
         stats->mFillBufferDoneTimeUs = ALooper::GetNowUs();
 
-        ALOGI("frame PTS %lld: %lld",
+        DC_MSG_HIGH("frame PTS %lld: %lld",
                 timeUs,
                 stats->mFillBufferDoneTimeUs - stats->mEmptyBufferTimeUs);
 
@@ -2941,7 +3022,7 @@ bool DashCodec::BaseState::onOMXFillBufferDone(
         case RESUBMIT_BUFFERS:
         {
             if (rangeLength == 0 && !(flags & OMX_BUFFERFLAG_EOS)) {
-                ALOGV("[%s] calling fillBuffer %p",
+                DC_MSG_HIGH("[%s] calling fillBuffer %p",
                      mCodec->mComponentName.c_str(), info->mBufferID);
 
                 CHECK_EQ(mCodec->mOMX->fillBuffer(
@@ -2953,7 +3034,7 @@ bool DashCodec::BaseState::onOMXFillBufferDone(
             }
 
             if (flags & OMX_BUFFERFLAG_EOS) {
-                ALOGE("[%s] saw output EOS", mCodec->mComponentName.c_str());
+                DC_MSG_HIGH("[%s] saw output EOS", mCodec->mComponentName.c_str());
 
                 sp<AMessage> notify = mCodec->mNotify->dup();
                 notify->setInt32("what", DashCodec::kWhatEOS);
@@ -2963,8 +3044,11 @@ bool DashCodec::BaseState::onOMXFillBufferDone(
                 mCodec->mPortEOS[kPortIndexOutput] = true;
                 break;
             }
-
+#ifdef ANDROID_JB_MR2
             if (!mCodec->mIsEncoder && !mCodec->mSentFormat && !mCodec->mSmoothStreaming) {
+#else
+            if (!mCodec->mIsEncoder && !mCodec->mSentFormat) {
+#endif
                 mCodec->sendFormatChange();
             }
 
@@ -2973,7 +3057,7 @@ bool DashCodec::BaseState::onOMXFillBufferDone(
 
 #if 0
                 if (IsIDR(info->mData)) {
-                    ALOGI("IDR frame");
+                    DC_MSG_HIGH("IDR frame");
                 }
 #endif
             }
@@ -2990,12 +3074,13 @@ bool DashCodec::BaseState::onOMXFillBufferDone(
             notify->setInt32("flags", flags);
             sp<AMessage> reply =
                 new AMessage(kWhatOutputBufferDrained, mCodec->id());
-
+#ifdef ANDROID_JB_MR2
            if (!mCodec->mPostFormat && mCodec->mSmoothStreaming){
-                   ALOGV("Resolution will change from this buffer, set a flag");
+                   DC_MSG_LOW("Resolution will change from this buffer, set a flag");
                    reply->setInt32("resChange", 1);
                    mCodec->mPostFormat = true;
             }
+#endif
 
             reply->setPointer("buffer-id", info->mBufferID);
 
@@ -3029,14 +3114,16 @@ void DashCodec::BaseState::onOutputBufferDrained(const sp<AMessage> &msg) {
     BufferInfo *info =
         mCodec->findBufferByID(kPortIndexOutput, bufferID, &index);
     CHECK_EQ((int)info->mStatus, (int)BufferInfo::OWNED_BY_DOWNSTREAM);
+#ifdef ANDROID_JB_MR2
     if (mCodec->mSmoothStreaming) {
         int32_t resChange = 0;
         if (msg->findInt32("resChange", &resChange) && resChange == 1) {
-            ALOGV("Resolution change is sent to native window now ");
+            DC_MSG_HIGH("Resolution change is sent to native window now ");
             mCodec->sendFormatChange();
             msg->setInt32("resChange", 0);
         }
     }
+#endif
     int32_t render;
     if (mCodec->mNativeWindow != NULL
             && msg->findInt32("render", &render) && render != 0) {
@@ -3082,7 +3169,7 @@ void DashCodec::BaseState::onOutputBufferDrained(const sp<AMessage> &msg) {
                 }
 
                 if (info != NULL) {
-                    ALOGV("[%s] calling fillBuffer %p",
+                    DC_MSG_HIGH("[%s] calling fillBuffer %p",
                          mCodec->mComponentName.c_str(), info->mBufferID);
 
                     CHECK_EQ(mCodec->mOMX->fillBuffer(mCodec->mNode, info->mBufferID),
@@ -3112,7 +3199,7 @@ DashCodec::UninitializedState::UninitializedState(DashCodec *codec)
 }
 
 void DashCodec::UninitializedState::stateEntered() {
-    ALOGV("Now uninitialized");
+    DC_MSG_LOW("Now uninitialized");
 }
 
 bool DashCodec::UninitializedState::onMessageReceived(const sp<AMessage> &msg) {
@@ -3165,7 +3252,7 @@ void DashCodec::UninitializedState::onSetup(
 }
 
 bool DashCodec::UninitializedState::onAllocateComponent(const sp<AMessage> &msg) {
-    ALOGV("onAllocateComponent");
+    DC_MSG_LOW("onAllocateComponent");
 
     CHECK(mCodec->mNode == NULL);
 
@@ -3228,10 +3315,10 @@ bool DashCodec::UninitializedState::onAllocateComponent(const sp<AMessage> &msg)
 
     if (node == NULL) {
         if (!mime.empty()) {
-            ALOGE("Unable to instantiate a decoder for type '%s'.",
+            DC_MSG_ERROR("Unable to instantiate a decoder for type '%s'.",
                  mime.c_str());
         } else {
-            ALOGE("Unable to instantiate decoder '%s'.", componentName.c_str());
+            DC_MSG_ERROR("Unable to instantiate decoder '%s'.", componentName.c_str());
         }
 
         mCodec->signalError(OMX_ErrorComponentNotFound);
@@ -3276,7 +3363,7 @@ DashCodec::LoadedState::LoadedState(DashCodec *codec)
 }
 
 void DashCodec::LoadedState::stateEntered() {
-    ALOGV("[%s] Now Loaded", mCodec->mComponentName.c_str());
+    DC_MSG_LOW("[%s] Now Loaded", mCodec->mComponentName.c_str());
 
     if (mCodec->mShutdownInProgress) {
         bool keepComponentAllocated = mCodec->mKeepComponentAllocated;
@@ -3346,11 +3433,12 @@ bool DashCodec::LoadedState::onMessageReceived(const sp<AMessage> &msg) {
 
 bool DashCodec::LoadedState::onConfigureComponent(
         const sp<AMessage> &msg) {
-    ALOGV("onConfigureComponent");
+    DC_MSG_LOW("onConfigureComponent");
 
     CHECK(mCodec->mNode != NULL);
 
     int32_t value;
+#ifdef ANDROID_JB_MR2
     if (msg->findInt32("smooth-streaming", &value) && (value == 1) &&
        !strcmp("OMX.qcom.video.decoder.avc", mCodec->mComponentName.c_str())) {
 
@@ -3358,18 +3446,19 @@ bool DashCodec::LoadedState::onConfigureComponent(
         if (property_get("hls.disable.smooth.streaming", value_ss, NULL) &&
            (!strcasecmp(value_ss, "true") || !strcmp(value_ss, "1"))) {
 
-            ALOGW("Dont enable Smooth streaming, disable property is set");
+            DC_MSG_HIGH("Dont enable Smooth streaming, disable property is set");
         } else {
             mCodec->mSmoothStreaming = true;
             status_t err = mCodec->InitSmoothStreaming();
             if (err != OK) {
-                ALOGE("Error in enabling smooth streaming, ignore & disable ");
+                DC_MSG_ERROR("Error in enabling smooth streaming, ignore & disable ");
                 mCodec->mSmoothStreaming = false;
             } else {
-                ALOGI("Smooth streaming is enabled ");
+                DC_MSG_HIGH("Smooth streaming is enabled ");
             }
         }
     }
+#endif
 
     if (msg->findInt32("secure-op", &value) && (value == 1)) {
         mCodec->mFlags |= kFlagIsSecureOPOnly;
@@ -3381,7 +3470,7 @@ bool DashCodec::LoadedState::onConfigureComponent(
     status_t err = mCodec->configureCodec(mime.c_str(), msg);
 
     if (err != OK) {
-        ALOGE("[%s] configureCodec returning error %d",
+        DC_MSG_ERROR("[%s] configureCodec returning error %d",
               mCodec->mComponentName.c_str(), err);
 
         mCodec->signalError(OMX_ErrorUndefined, err);
@@ -3412,7 +3501,7 @@ bool DashCodec::LoadedState::onConfigureComponent(
 }
 
 void DashCodec::LoadedState::onStart() {
-    ALOGV("onStart");
+    DC_MSG_LOW("onStart");
 
     CHECK_EQ(mCodec->mOMX->sendCommand(
                 mCodec->mNode, OMX_CommandStateSet, OMX_StateIdle),
@@ -3428,11 +3517,11 @@ DashCodec::LoadedToIdleState::LoadedToIdleState(DashCodec *codec)
 }
 
 void DashCodec::LoadedToIdleState::stateEntered() {
-    ALOGV("[%s] Now Loaded->Idle", mCodec->mComponentName.c_str());
+    DC_MSG_LOW("[%s] Now Loaded->Idle", mCodec->mComponentName.c_str());
 
     status_t err;
     if ((err = allocateBuffers()) != OK) {
-        ALOGE("Failed to allocate buffers after transitioning to IDLE state "
+        DC_MSG_ERROR("Failed to allocate buffers after transitioning to IDLE state "
              "(error 0x%08x)",
              err);
 
@@ -3494,7 +3583,7 @@ DashCodec::IdleToExecutingState::IdleToExecutingState(DashCodec *codec)
 }
 
 void DashCodec::IdleToExecutingState::stateEntered() {
-    ALOGV("[%s] Now Idle->Executing", mCodec->mComponentName.c_str());
+    DC_MSG_LOW("[%s] Now Idle->Executing", mCodec->mComponentName.c_str());
 }
 
 bool DashCodec::IdleToExecutingState::onMessageReceived(const sp<AMessage> &msg) {
@@ -3556,7 +3645,7 @@ void DashCodec::ExecutingState::submitOutputBuffers() {
             CHECK_EQ((int)info->mStatus, (int)BufferInfo::OWNED_BY_US);
         }
 
-        ALOGV("[%s] calling fillBuffer %p",
+        DC_MSG_HIGH("[%s] calling fillBuffer %p",
              mCodec->mComponentName.c_str(), info->mBufferID);
 
         CHECK_EQ(mCodec->mOMX->fillBuffer(mCodec->mNode, info->mBufferID),
@@ -3568,7 +3657,7 @@ void DashCodec::ExecutingState::submitOutputBuffers() {
 
 void DashCodec::ExecutingState::resume() {
     if (mActive) {
-        ALOGV("[%s] We're already active, no need to resume.",
+        DC_MSG_LOW("[%s] We're already active, no need to resume.",
              mCodec->mComponentName.c_str());
 
         return;
@@ -3586,7 +3675,7 @@ void DashCodec::ExecutingState::resume() {
 }
 
 void DashCodec::ExecutingState::stateEntered() {
-    ALOGV("[%s] Now Executing", mCodec->mComponentName.c_str());
+    DC_MSG_LOW("[%s] Now Executing", mCodec->mComponentName.c_str());
 
     mCodec->processDeferredMessages();
 }
@@ -3618,7 +3707,7 @@ bool DashCodec::ExecutingState::onMessageReceived(const sp<AMessage> &msg) {
 
         case kWhatFlush:
         {
-            ALOGV("[%s] ExecutingState flushing now "
+            DC_MSG_LOW("[%s] ExecutingState flushing now "
                  "(codec owns %d/%d input, %d/%d output).",
                     mCodec->mComponentName.c_str(),
                     mCodec->countBuffersOwnedByComponent(kPortIndexInput),
@@ -3650,7 +3739,7 @@ bool DashCodec::ExecutingState::onMessageReceived(const sp<AMessage> &msg) {
         {
             status_t err = mCodec->requestIDRFrame();
             if (err != OK) {
-                ALOGW("Requesting an IDR frame failed.");
+                DC_MSG_HIGH("Requesting an IDR frame failed.");
             }
 
             handled = true;
@@ -3673,7 +3762,7 @@ bool DashCodec::ExecutingState::onOMXEvent(
             CHECK_EQ(data1, (OMX_U32)kPortIndexOutput);
 
             if (data2 == 0 || data2 == OMX_IndexParamPortDefinition) {
-                ALOGV("Flush output port before disable");
+                DC_MSG_LOW("Flush output port before disable");
                 CHECK_EQ(mCodec->mOMX->sendCommand(
                         mCodec->mNode, OMX_CommandFlush, kPortIndexOutput),
                      (status_t)OK);
@@ -3685,7 +3774,7 @@ bool DashCodec::ExecutingState::onOMXEvent(
                 mCodec->mPostFormat = false;
                 mCodec->queueNextFormat();
             } else {
-                ALOGV("[%s] OMX_EventPortSettingsChanged 0x%08lx",
+                DC_MSG_LOW("[%s] OMX_EventPortSettingsChanged 0x%08lx",
                      mCodec->mComponentName.c_str(), data2);
             }
 
@@ -3693,7 +3782,7 @@ bool DashCodec::ExecutingState::onOMXEvent(
         }
         case OMX_EventIndexsettingChanged:
         {
-            ALOGW("[%s] Received OMX_EventIndexsettingChanged event ", mCodec->mComponentName.c_str());
+            DC_MSG_HIGH("[%s] Received OMX_EventIndexsettingChanged event ", mCodec->mComponentName.c_str());
             mCodec->mSentFormat = false;
             return true;
         }
@@ -3735,7 +3824,7 @@ bool DashCodec::OutputPortSettingsChangedState::onMessageReceived(
         case kWhatResume:
         {
             if (msg->what() == kWhatResume) {
-                ALOGV("[%s] Deferring resume", mCodec->mComponentName.c_str());
+                DC_MSG_LOW("[%s] Deferring resume", mCodec->mComponentName.c_str());
             }
 
             mCodec->deferMessage(msg);
@@ -3752,7 +3841,7 @@ bool DashCodec::OutputPortSettingsChangedState::onMessageReceived(
 }
 
 void DashCodec::OutputPortSettingsChangedState::stateEntered() {
-    ALOGV("[%s] Now handling output port settings change",
+    DC_MSG_LOW("[%s] Now handling output port settings change",
          mCodec->mComponentName.c_str());
 }
 
@@ -3764,7 +3853,7 @@ bool DashCodec::OutputPortSettingsChangedState::onOMXEvent(
             if (data1 == (OMX_U32)OMX_CommandPortDisable) {
                 CHECK_EQ(data2, (OMX_U32)kPortIndexOutput);
 
-                ALOGV("[%s] Output port now disabled.",
+                DC_MSG_LOW("[%s] Output port now disabled.",
                         mCodec->mComponentName.c_str());
 
                 CHECK(mCodec->mBuffers[kPortIndexOutput].isEmpty());
@@ -3777,7 +3866,7 @@ bool DashCodec::OutputPortSettingsChangedState::onOMXEvent(
                 status_t err;
                 if ((err = mCodec->allocateBuffersOnPort(
                                 kPortIndexOutput)) != OK) {
-                    ALOGE("Failed to allocate output port buffers after "
+                    DC_MSG_ERROR("Failed to allocate output port buffers after "
                          "port reconfiguration (error 0x%08x)",
                          err);
 
@@ -3799,7 +3888,7 @@ bool DashCodec::OutputPortSettingsChangedState::onOMXEvent(
 
                 mCodec->mSentFormat = false;
 
-                ALOGV("[%s] Output port now reenabled.",
+                DC_MSG_LOW("[%s] Output port now reenabled.",
                         mCodec->mComponentName.c_str());
 
                 if (mCodec->mExecutingState->active()) {
@@ -3847,7 +3936,7 @@ bool DashCodec::ExecutingToIdleState::onMessageReceived(const sp<AMessage> &msg)
 }
 
 void DashCodec::ExecutingToIdleState::stateEntered() {
-    ALOGV("[%s] Now Executing->Idle", mCodec->mComponentName.c_str());
+    DC_MSG_LOW("[%s] Now Executing->Idle", mCodec->mComponentName.c_str());
 
     mComponentNowIdle = false;
     mCodec->mSentFormat = false;
@@ -3942,7 +4031,7 @@ bool DashCodec::IdleToLoadedState::onMessageReceived(const sp<AMessage> &msg) {
 }
 
 void DashCodec::IdleToLoadedState::stateEntered() {
-    ALOGV("[%s] Now Idle->Loaded", mCodec->mComponentName.c_str());
+    DC_MSG_LOW("[%s] Now Idle->Loaded", mCodec->mComponentName.c_str());
 }
 
 bool DashCodec::IdleToLoadedState::onOMXEvent(
@@ -3970,7 +4059,7 @@ DashCodec::FlushingState::FlushingState(DashCodec *codec)
 }
 
 void DashCodec::FlushingState::stateEntered() {
-    ALOGV("[%s] Now Flushing", mCodec->mComponentName.c_str());
+    DC_MSG_LOW("[%s] Now Flushing", mCodec->mComponentName.c_str());
 
     mFlushComplete[kPortIndexInput] = mFlushComplete[kPortIndexOutput] = false;
 }
@@ -4002,7 +4091,7 @@ bool DashCodec::FlushingState::onMessageReceived(const sp<AMessage> &msg) {
 
 bool DashCodec::FlushingState::onOMXEvent(
         OMX_EVENTTYPE event, OMX_U32 data1, OMX_U32 data2) {
-    ALOGV("[%s] FlushingState onOMXEvent(%d,%ld)",
+    DC_MSG_LOW("[%s] FlushingState onOMXEvent(%d,%ld)",
             mCodec->mComponentName.c_str(), event, data1);
 
     switch (event) {
@@ -4038,7 +4127,7 @@ bool DashCodec::FlushingState::onOMXEvent(
             msg->setInt32("data1", data1);
             msg->setInt32("data2", data2);
 
-            ALOGV("[%s] Deferring OMX_EventPortSettingsChanged",
+            DC_MSG_LOW("[%s] Deferring OMX_EventPortSettingsChanged",
                  mCodec->mComponentName.c_str());
 
             mCodec->deferMessage(msg);
@@ -4097,7 +4186,7 @@ DashCodec::BaseState::PortMode DashCodec::FlushingOutputState::getPortMode(OMX_U
 }
 
 void DashCodec::FlushingOutputState::stateEntered() {
-    ALOGV("[%s] Now Flushing Output Port", mCodec->mComponentName.c_str());
+    DC_MSG_LOW("[%s] Now Flushing Output Port", mCodec->mComponentName.c_str());
 
     mFlushComplete = false;
 }
@@ -4115,7 +4204,7 @@ bool DashCodec::FlushingOutputState::onMessageReceived(const sp<AMessage> &msg) 
 
         case kWhatFlush:
         {
-            ALOGV("Flush received during port reconfig, deferring it");
+            DC_MSG_LOW("Flush received during port reconfig, deferring it");
             mCodec->deferMessage(msg);
             handled = true;
             break;
@@ -4144,7 +4233,7 @@ bool DashCodec::FlushingOutputState::onOMXEvent(
         {
             CHECK_EQ(data1, (OMX_U32)OMX_CommandFlush);
             CHECK_EQ(data2,(OMX_U32)kPortIndexOutput);
-            ALOGV("FlushingOutputState::onOMXEvent Output port flush complete");
+            DC_MSG_LOW("FlushingOutputState::onOMXEvent Output port flush complete");
             mFlushComplete = true;
             changeStateIfWeOwnAllBuffers();
             return true;
@@ -4159,7 +4248,7 @@ bool DashCodec::FlushingOutputState::onOMXEvent(
             msg->setInt32("data1", data1);
             msg->setInt32("data2", data2);
 
-            ALOGV("[%s] Deferring OMX_EventPortSettingsChanged",
+            DC_MSG_LOW("[%s] Deferring OMX_EventPortSettingsChanged",
                  mCodec->mComponentName.c_str());
 
             mCodec->deferMessage(msg);
@@ -4187,10 +4276,10 @@ void DashCodec::FlushingOutputState::onInputBufferFilled(const sp<AMessage> &msg
 }
 
 void DashCodec::FlushingOutputState::changeStateIfWeOwnAllBuffers() {
-   ALOGV("FlushingOutputState::ChangeState %d",mFlushComplete);
+   DC_MSG_LOW("FlushingOutputState::ChangeState %d",mFlushComplete);
 
    if (mFlushComplete && mCodec->allYourBuffersAreBelongToUs( kPortIndexOutput )) {
-        ALOGV("FlushingOutputState Sending port disable ");
+        DC_MSG_LOW("FlushingOutputState Sending port disable ");
         CHECK_EQ(mCodec->mOMX->sendCommand(
                             mCodec->mNode,
                             OMX_CommandPortDisable, kPortIndexOutput),
@@ -4199,10 +4288,10 @@ void DashCodec::FlushingOutputState::changeStateIfWeOwnAllBuffers() {
         mCodec->mPortEOS[kPortIndexInput] = false;
         mCodec->mPortEOS[kPortIndexOutput] = false;
 
-        ALOGV("FlushingOutputState Calling freeOutputBuffersNotOwnedByComponent");
+        DC_MSG_LOW("FlushingOutputState Calling freeOutputBuffersNotOwnedByComponent");
         mCodec->freeOutputBuffersNotOwnedByComponent();
 
-        ALOGV("FlushingOutputState Change state to port settings changed");
+        DC_MSG_LOW("FlushingOutputState Change state to port settings changed");
         mCodec->changeState(mCodec->mOutputPortSettingsChangedState);
     }
 }
