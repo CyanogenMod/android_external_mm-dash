@@ -112,9 +112,6 @@ private:
     bool mHasVideo;
     bool mSyncQueues;
 
-    bool mIsFirstVideoframeReceived;
-    bool mPendingPostAudioDrains;
-
     bool mPaused;
     bool mWasPaused; // if paused then store the info
 
