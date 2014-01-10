@@ -1125,10 +1125,9 @@ status_t DashCodec::configureCodec(
                              GRALLOC_USAGE_SW_WRITE_MASK)) == 0;
             }
 
-            int32_t maxWidth = 0, maxHeight = 0;
-            if (canDoAdaptivePlayback &&
-                msg->findInt32("max-width", &maxWidth) &&
-                msg->findInt32("max-height", &maxHeight)) {
+            int32_t maxWidth = MAX_WIDTH;
+            int32_t maxHeight = MAX_HEIGHT;
+            if (canDoAdaptivePlayback){
                 DC_MSG_ERROR("[%s] prepareForAdaptivePlayback(%d%d)",
                       mComponentName.c_str(), maxWidth, maxHeight);
 
