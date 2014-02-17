@@ -1,5 +1,5 @@
 /*
- *Copyright (c) 2013, The Linux Foundation. All rights reserved.
+ *Copyright (c) 2014, The Linux Foundation. All rights reserved.
  *Not a Contribution, Apache license notifications and license are retained
  *for attribution purposes only.
  *
@@ -830,26 +830,81 @@ void DashPlayer::onMessageReceived(const sp<AMessage> &msg) {
 
         case kWhatResume:
         {
-            mPauseIndication = false;
-
             if (mSourceType == kHttpDashSource) {
-              status_t nRet = UNKNOWN_ERROR;
+              bool disc = mSource->isPlaybackDiscontinued();
+              status_t status = OK;
+
+              if (disc == true)
+              {
+                uint64_t nMin = 0, nMax = 0, nMaxDepth = 0;
+                status = mSource->getRepositionRange(&nMin, &nMax, &nMaxDepth);
+                if (status == OK)
+                {
+                  int64_t seekTimeUs = (int64_t)nMin * 1000ll;
+
+                  DP_MSG_HIGH("kWhatSeek seekTimeUs=%lld us (%.2f secs)", seekTimeUs, seekTimeUs / 1E6);
+
+                  status = mSource->seekTo(seekTimeUs);
+                  if (status == OK)
+                  {
+                    // if seek success then flush the audio,video decoder and renderer
+                    mTimeDiscontinuityPending = true;
+                    bool audPresence = false;
+                    bool vidPresence = false;
+                    bool textPresence = false;
+                    (void)mSource->getMediaPresence(audPresence,vidPresence,textPresence);
+                    mRenderer->setMediaPresence(true,audPresence); // audio
+                    mRenderer->setMediaPresence(false,vidPresence); // video
+                    if( (mVideoDecoder != NULL) &&
+                      (mFlushingVideo == NONE || mFlushingVideo == AWAITING_DISCONTINUITY) ) {
+                        flushDecoder( false, true ); // flush video, shutdown
+                    }
+
+                    if( (mAudioDecoder != NULL) &&
+                      (mFlushingAudio == NONE|| mFlushingAudio == AWAITING_DISCONTINUITY) )
+                    {
+                      flushDecoder( true, true );  // flush audio,  shutdown
+                    }
+                    if( mAudioDecoder == NULL ) {
+                      DP_MSG_MEDIUM("Audio is not there, set it to shutdown");
+                      mFlushingAudio = SHUT_DOWN;
+                    }
+                    if( mVideoDecoder == NULL ) {
+                      DP_MSG_MEDIUM("Video is not there, set it to shutdown");
+                      mFlushingVideo = SHUT_DOWN;
+                    }
+
+                    if (mDriver != NULL)
+                    {
+                      sp<DashPlayerDriver> driver = mDriver.promote();
+                      if (driver != NULL)
+                      {
+                        if( seekTimeUs >= 0 ) {
+                          mRenderer->notifySeekPosition(seekTimeUs);
+                          driver->notifyPosition( seekTimeUs );
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+
+              if (status != OK)
+              {
+                //Notify error?
+                DP_MSG_ERROR(" Dash Source playback discontinuity check failure");
+                notifyListener(MEDIA_ERROR, MEDIA_ERROR_UNKNOWN, status);
+              }
+
                Mutex::Autolock autoLock(mLock);
                if (mSource != NULL) {
-                nRet = mSource->resume();
+                status_t nRet = mSource->resume();
                }
-
                 if (mAudioDecoder == NULL || mVideoDecoder == NULL || mTextDecoder == NULL) {
                     mScanSourcesPending = false;
                     postScanSources();
                 }
-            }
-            else
-            {
-              CHECK(mRenderer != NULL);
-              mRenderer->resume();
-
-              if (mSourceType == kWfdSource) {
+            }else if (mSourceType == kWfdSource) {
                 CHECK(mSource != NULL);
                 mSource->resume();
                 int count = 0;
@@ -866,7 +921,12 @@ void DashPlayer::onMessageReceived(const sp<AMessage> &msg) {
                     postScanSources();
                 }
             }
-            }
+
+            CHECK(mRenderer != NULL);
+            mRenderer->resume();
+
+            mPauseIndication = false;
+
             break;
         }
 
@@ -973,86 +1033,10 @@ void DashPlayer::onMessageReceived(const sp<AMessage> &msg) {
                                 ,mBufferingNotification);
                         }
                     }
-                  else if (what == kWhatSourceResumeStatus)
-                  {
-                    status_t status;
-                    sourceRequest->findInt32("status", &status);
-                    if (status == OK)
-                    {
-                      int32_t disc;
-                      sourceRequest->findInt32("discontinuity", &disc);
-                      if (disc == 1 && mSourceType == kHttpDashSource)
-                      {
-                        uint64_t nMin = 0, nMax = 0, nMaxDepth = 0;
-                        status = mSource->getRepositionRange(&nMin, &nMax, &nMaxDepth);
-                        if (status == OK)
-                        {
-                          int64_t seekTimeUs = (int64_t)nMin * 1000ll;
-
-                          DP_MSG_HIGH("kWhatSeek seekTimeUs=%lld us (%.2f secs)", seekTimeUs, seekTimeUs / 1E6);
-
-                          status = mSource->seekTo(seekTimeUs);
-                          if (status == OK)
-                          {
-                            // if seek success then flush the audio,video decoder and renderer
-                            mTimeDiscontinuityPending = true;
-                            bool audPresence = false;
-                            bool vidPresence = false;
-                            bool textPresence = false;
-                            (void)mSource->getMediaPresence(audPresence,vidPresence,textPresence);
-                            mRenderer->setMediaPresence(true,audPresence); // audio
-                            mRenderer->setMediaPresence(false,vidPresence); // video
-                            if( (mVideoDecoder != NULL) &&
-                              (mFlushingVideo == NONE || mFlushingVideo == AWAITING_DISCONTINUITY) ) {
-                                flushDecoder( false, true ); // flush video, shutdown
-            }
-
-                            if( (mAudioDecoder != NULL) &&
-                              (mFlushingAudio == NONE|| mFlushingAudio == AWAITING_DISCONTINUITY) )
-                            {
-                              flushDecoder( true, true );  // flush audio,  shutdown
                             }
-                            if( mAudioDecoder == NULL ) {
-                              DP_MSG_HIGH("Audio is not there, set it to shutdown");
-                              mFlushingAudio = SHUT_DOWN;
                             }
-                            if( mVideoDecoder == NULL ) {
-                              DP_MSG_HIGH("Video is not there, set it to shutdown");
-                              mFlushingVideo = SHUT_DOWN;
-                            }
-
-                            if (mDriver != NULL)
-                            {
-                              sp<DashPlayerDriver> driver = mDriver.promote();
-                              if (driver != NULL)
-                              {
-                                if( seekTimeUs >= 0 ) {
-                                  mRenderer->notifySeekPosition(seekTimeUs);
-                                  driver->notifyPosition( seekTimeUs );
-                }
-            }
-                            }
-                          }
-                        }
-                      }
-                    }
-                    if (status == OK)
-                    {
-                      CHECK(mRenderer != NULL);
-                      mRenderer->resume();
-                    }
-                    else
-                    {
-                      //Notify error?
-                      DP_MSG_ERROR("kWhatSourceResumeStatus - Resume async failure");
-                      notifyListener(MEDIA_ERROR, MEDIA_ERROR_UNKNOWN, status);
-                    }
-                  }
-                }
-              }
-              else
-              {
-              DP_MSG_ERROR("kWhatSourceNotify - Source object does not exist anymore");
+            else {
+                 DP_MSG_ERROR("kWhatSourceNotify - Source object does not exist anymore");
             }
             break;
        }
