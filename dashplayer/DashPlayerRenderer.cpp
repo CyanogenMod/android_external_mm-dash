@@ -177,8 +177,8 @@ void DashPlayer::Renderer::onMessageReceived(const sp<AMessage> &msg) {
                 // This is how long the audio sink will have data to
                 // play back.
                 int64_t delayUs =
-                    mAudioSink->msecsPerFrame()
-                        * numFramesPendingPlayout * 1000ll;
+                    (int64_t)(mAudioSink->msecsPerFrame()
+                        * (float)(numFramesPendingPlayout * 1000ll));
 
                 // Let's give it more data after about half that time
                 // has elapsed.
@@ -317,7 +317,7 @@ bool DashPlayer::Renderer::onDrainAudioQueue() {
             int64_t mediaTimeUs;
             CHECK(entry->mBuffer->meta()->findInt64("timeUs", &mediaTimeUs));
 
-            DPR_MSG_HIGH("rendering audio at media time %.2f secs", mediaTimeUs / 1E6);
+            DPR_MSG_HIGH("rendering audio at media time %.2f secs", (double)mediaTimeUs / 1E6);
 
             mAnchorTimeMediaUs = mediaTimeUs;
 
@@ -328,9 +328,9 @@ bool DashPlayer::Renderer::onDrainAudioQueue() {
                 mNumFramesWritten - numFramesPlayed;
 
             int64_t realTimeOffsetUs =
-                (mAudioSink->latency() / 2  /* XXX */
-                    + numFramesPendingPlayout
-                        * mAudioSink->msecsPerFrame()) * 1000ll;
+                (int64_t)(((float)mAudioSink->latency() / 2  /* XXX */
+                    + (float)numFramesPendingPlayout
+                        * mAudioSink->msecsPerFrame()) * 1000ll);
 
             // DPR_MSG_HIGH("realTimeOffsetUs = %lld us", realTimeOffsetUs);
 
@@ -357,7 +357,7 @@ bool DashPlayer::Renderer::onDrainAudioQueue() {
 
         numBytesAvailableToWrite -= copy;
         size_t copiedFrames = copy / mAudioSink->frameSize();
-        mNumFramesWritten += copiedFrames;
+        mNumFramesWritten += (uint32_t)copiedFrames;
     }
 
     notifyPosition();
@@ -448,12 +448,12 @@ void DashPlayer::Renderer::onDrainVideoQueue() {
 
     if (tooLate) {
         DPR_MSG_HIGH("video late by %lld us (%.2f secs)",
-             mVideoLateByUs, mVideoLateByUs / 1E6);
+             mVideoLateByUs, (double)mVideoLateByUs / 1E6);
         if(mStats != NULL) {
             mStats->recordLate(realTimeUs,nowUs,mVideoLateByUs,mAnchorTimeRealUs);
         }
     } else {
-        DPR_MSG_HIGH("rendering video at media time %.2f secs", mediaTimeUs / 1E6);
+        DPR_MSG_HIGH("rendering video at media time %.2f secs", (double)mediaTimeUs / 1E6);
         if(mStats != NULL) {
             mStats->recordOnTime(realTimeUs,nowUs,mVideoLateByUs);
             mStats->incrementTotalRenderingFrames();
@@ -554,7 +554,7 @@ void DashPlayer::Renderer::onQueueBuffer(const sp<AMessage> &msg) {
 
     int64_t diff = firstVideoTimeUs - firstAudioTimeUs;
 
-    DPR_MSG_LOW("queueDiff = %.2f secs", diff / 1E6);
+    DPR_MSG_LOW("queueDiff = %.2f secs", (double)diff / 1E6);
 
     if (diff > 100000ll) {
         // Audio data starts More than 0.1 secs before video.

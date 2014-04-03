@@ -63,7 +63,7 @@ namespace android {
 
 template<class T>
 static void InitOMXParams(T *params) {
-    params->nSize = sizeof(T);
+    params->nSize = (OMX_U32)sizeof(T);
     params->nVersion.s.nVersionMajor = 1;
     params->nVersion.s.nVersionMinor = 0;
     params->nVersion.s.nRevision = 0;
@@ -724,7 +724,7 @@ status_t DashCodec::allocateOutputBuffersFromNativeWindow() {
         // If an error occurred while dequeuing we need to cancel any buffers
         // that were dequeued.
         cancelStart = 0;
-        cancelEnd = mBuffers[kPortIndexOutput].size();
+        cancelEnd = (OMX_U32)mBuffers[kPortIndexOutput].size();
     } else {
         // Return the required minimum undequeued buffers to the native window.
         cancelStart = bufferCount - minUndequeuedBuffers;
@@ -1297,7 +1297,7 @@ status_t DashCodec::setMinBufferSize(OMX_U32 portIndex, size_t size) {
         return OK;
     }
 
-    def.nBufferSize = size;
+    def.nBufferSize = (OMX_U32)size;
 
     err = mOMX->setParameter(
             mNode, OMX_IndexParamPortDefinition, &def, sizeof(def));
@@ -1954,7 +1954,7 @@ status_t DashCodec::setupMPEG4EncoderParameters(const sp<AMessage> &msg) {
     mpeg4type.nAllowedPictureTypes =
         OMX_VIDEO_PictureTypeI | OMX_VIDEO_PictureTypeP;
 
-    mpeg4type.nPFrames = setPFramesSpacing(iFrameInterval, frameRate);
+    mpeg4type.nPFrames = setPFramesSpacing(iFrameInterval, (int32_t)frameRate);
     if (mpeg4type.nPFrames == 0) {
         mpeg4type.nAllowedPictureTypes = OMX_VIDEO_PictureTypeI;
     }
@@ -2031,7 +2031,7 @@ status_t DashCodec::setupH263EncoderParameters(const sp<AMessage> &msg) {
     h263type.nAllowedPictureTypes =
         OMX_VIDEO_PictureTypeI | OMX_VIDEO_PictureTypeP;
 
-    h263type.nPFrames = setPFramesSpacing(iFrameInterval, frameRate);
+    h263type.nPFrames = setPFramesSpacing(iFrameInterval, (int32_t)frameRate);
     if (h263type.nPFrames == 0) {
         h263type.nAllowedPictureTypes = OMX_VIDEO_PictureTypeI;
     }
@@ -2136,7 +2136,7 @@ status_t DashCodec::setupAVCEncoderParameters(const sp<AMessage> &msg) {
         h264type.bUseHadamard = OMX_TRUE;
         h264type.nRefFrames = 1;
         h264type.nBFrames = 0;
-        h264type.nPFrames = setPFramesSpacing(iFrameInterval, frameRate);
+        h264type.nPFrames = setPFramesSpacing(iFrameInterval, (int32_t)frameRate);
         if (h264type.nPFrames == 0) {
             h264type.nAllowedPictureTypes = OMX_VIDEO_PictureTypeI;
         }
@@ -2538,8 +2538,8 @@ void DashCodec::sendFormatChange() {
                         DC_MSG_HIGH("Replacing SkipCutBuffer holding %d bytes", prevbufsize);
                     }
                 }
-                mSkipCutBuffer = new SkipCutBuffer(mEncoderDelay * frameSize,
-                                                   mEncoderPadding * frameSize);
+                mSkipCutBuffer = new SkipCutBuffer((int32_t)(mEncoderDelay * frameSize),
+                                                   (int32_t)(mEncoderPadding * frameSize));
             }
 
             if (mChannelMaskPresent) {
@@ -2751,7 +2751,7 @@ DashCodec::BaseState::BaseState(DashCodec *codec, const sp<AState> &parentState)
       mCodec(codec) {
 }
 
-DashCodec::BaseState::PortMode DashCodec::BaseState::getPortMode(OMX_U32 portIndex) {
+DashCodec::BaseState::PortMode DashCodec::BaseState::getPortMode(OMX_U32 /* portIndex */) {
     return KEEP_BUFFERS;
 }
 
@@ -3063,7 +3063,7 @@ void DashCodec::BaseState::onInputBufferFilled(const sp<AMessage> &msg) {
                             mCodec->mNode,
                             bufferID,
                             0,
-                            buffer->size(),
+                            (OMX_U32)buffer->size(),
                             flags,
                             timeUs),
                          (status_t)OK);
@@ -3163,8 +3163,8 @@ bool DashCodec::BaseState::onOMXFillBufferDone(
         size_t rangeOffset, size_t rangeLength,
         OMX_U32 flags,
         int64_t timeUs,
-        void *platformPrivate,
-        void *dataPtr) {
+        void * /*platformPrivate*/,
+        void * /*dataPtr*/) {
     DC_MSG_HIGH("[%s] onOMXFillBufferDone %p time %lld us, flags = 0x%08lx",
          mCodec->mComponentName.c_str(), bufferID, timeUs, flags);
 
@@ -3781,7 +3781,7 @@ DashCodec::ExecutingState::ExecutingState(DashCodec *codec)
 }
 
 DashCodec::BaseState::PortMode DashCodec::ExecutingState::getPortMode(
-        OMX_U32 portIndex) {
+        OMX_U32 /* portIndex */) {
     return RESUBMIT_BUFFERS;
 }
 

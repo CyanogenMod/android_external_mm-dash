@@ -194,7 +194,7 @@ void DashPlayer::setDriver(const wp<DashPlayerDriver> &driver) {
     mDriver = driver;
 }
 
-void DashPlayer::setDataSource(const sp<IStreamSource> &source) {
+void DashPlayer::setDataSource(const sp<IStreamSource> &/*source*/) {
     DP_MSG_ERROR("DashPlayer::setDataSource not Implemented...");
 }
 
@@ -225,7 +225,7 @@ status_t DashPlayer::setDataSource(
     }
 }
 
-void DashPlayer::setDataSource(int fd, int64_t offset, int64_t length) {
+void DashPlayer::setDataSource(int /*fd*/, int64_t /*offset*/, int64_t /*length*/) {
    DP_MSG_ERROR("DashPlayer::setDataSource not Implemented...");
 }
 
@@ -539,7 +539,7 @@ void DashPlayer::onMessageReceived(const sp<AMessage> &msg) {
                       } else {
                         sp<AMessage> reply;
                         CHECK(codecRequest->findMessage("reply", &reply));
-                        reply->setInt32("err", UNKNOWN_ERROR);
+                        reply->setInt32("err", (status_t)UNKNOWN_ERROR);
                         reply->post();
                       }
                     }
@@ -571,7 +571,7 @@ void DashPlayer::onMessageReceived(const sp<AMessage> &msg) {
                 DP_MSG_LOW("@@@@:: Dashplayer :: MESSAGE FROM DASHCODEC +++++++++++++++++++++++++++++++ kWhatFlushCompleted");
 
                 Mutex::Autolock autoLock(mLock);
-                bool needShutdown;
+                bool needShutdown = false;
 
                 if (track == kAudio) {
                     CHECK(IsFlushingState(mFlushingAudio, &needShutdown));
@@ -706,7 +706,7 @@ void DashPlayer::onMessageReceived(const sp<AMessage> &msg) {
                      (track == kVideo && !IsFlushingState(mFlushingVideo)))
                   {
                     DP_MSG_ERROR("@@@@:: Dashplayer :: MESSAGE FROM DASHCODEC +++++++++++++++++++++++++++++++ DashCodec::kWhatError:: %s",track == kAudio ? "audio" : "video");
-                    mRenderer->queueEOS(track, UNKNOWN_ERROR);
+                    mRenderer->queueEOS(track, (status_t)UNKNOWN_ERROR);
                 }
                   else{
                     DP_MSG_ERROR("EOS not queued for %d track", track);
@@ -855,7 +855,7 @@ void DashPlayer::onMessageReceived(const sp<AMessage> &msg) {
             CHECK(msg->findInt64("seekTimeUs", &seekTimeUs));
 
             DP_MSG_HIGH("kWhatSeek seekTimeUs=%lld us (%.2f secs)",
-                 seekTimeUs, seekTimeUs / 1E6);
+                 seekTimeUs, (double)seekTimeUs / 1E6);
 
             nRet = mSource->seekTo(seekTimeUs);
 
@@ -977,7 +977,7 @@ void DashPlayer::onMessageReceived(const sp<AMessage> &msg) {
                 {
                   int64_t seekTimeUs = (int64_t)nMin * 1000ll;
 
-                  DP_MSG_HIGH("kWhatSeek seekTimeUs=%lld us (%.2f secs)", seekTimeUs, seekTimeUs / 1E6);
+                  DP_MSG_HIGH("kWhatSeek seekTimeUs=%lld us (%.2f secs)", seekTimeUs, (double)seekTimeUs / 1E6);
 
                   status = mSource->seekTo(seekTimeUs);
                   if (status == OK)
@@ -1530,7 +1530,7 @@ status_t DashPlayer::feedDecoderInputData(int track, const sp<AMessage> &msg) {
     bool dropAccessUnit;
     do {
 
-        status_t err = UNKNOWN_ERROR;
+        status_t err = (status_t)UNKNOWN_ERROR;
 
         if (mIsSecureInputBuffers && track == kVideo) {
             msg->findBuffer("buffer", &accessUnit);
@@ -1851,7 +1851,7 @@ status_t DashPlayer::getParameter(int key, Parcel *reply)
     if (mSource == NULL)
     {
       DP_MSG_ERROR("Source is NULL in getParameter\n");
-      return UNKNOWN_ERROR;
+      return ((status_t)UNKNOWN_ERROR);
     }
     if (key == KEY_DASH_REPOSITION_RANGE)
     {
@@ -1994,7 +1994,7 @@ void DashPlayer::sendTextPacket(sp<ABuffer> accessUnit,status_t err)
     parcel.writeInt32(KEY_START_TIME);
     parcel.writeInt32((int32_t)(mediaTimeUs / 1000));  // convert micro sec to milli sec
 
-    DP_MSG_HIGH("sendTextPacket Text Track Timestamp (%0.2f) sec",mediaTimeUs / 1E6);
+    DP_MSG_HIGH("sendTextPacket Text Track Timestamp (%0.2f) sec",(double)mediaTimeUs / 1E6);
 
     // Text Sample
     parcel.writeInt32(KEY_STRUCT_TEXT);
@@ -2014,8 +2014,8 @@ void DashPlayer::sendTextPacket(sp<ABuffer> accessUnit,status_t err)
     }
 
     // write size of sample
-    parcel.writeInt32(accessUnit->size());
-    parcel.writeInt32(accessUnit->size());
+    parcel.writeInt32((int32_t)accessUnit->size());
+    parcel.writeInt32((int32_t)accessUnit->size());
     // write sample payload
     parcel.write((const uint8_t *)accessUnit->data(), accessUnit->size());
 
@@ -2106,7 +2106,7 @@ void DashPlayer::prepareSource()
     }
 }
 
-status_t DashPlayer::dump(int fd, const Vector<String16> &args)
+status_t DashPlayer::dump(int fd, const Vector<String16> &/*args*/)
 {
     if(mStats != NULL) {
       mStats->setFileDescAndOutputStream(fd);

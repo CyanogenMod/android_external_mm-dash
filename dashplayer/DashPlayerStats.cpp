@@ -86,7 +86,7 @@ void DashPlayerStats::setFileDescAndOutputStream(int fd) {
 void DashPlayerStats::setMime(const char* mime) {
     Mutex::Autolock autoLock(mStatsLock);
     if(mime != NULL) {
-        int mimeLen = strlen(mime);
+        int mimeLen = (int)strlen(mime);
         if(mMIME) {
           delete[] mMIME;
         }
@@ -96,7 +96,7 @@ void DashPlayerStats::setMime(const char* mime) {
     }
 }
 
-void DashPlayerStats::setVeryFirstFrame(bool vff) {
+void DashPlayerStats::setVeryFirstFrame(bool /*vff*/) {
     Mutex::Autolock autoLock(mStatsLock);
     mVeryFirstFrame = true;
 }
@@ -136,7 +136,7 @@ void DashPlayerStats::logStatistics() {
         fprintf(mFileOut, "Number of frames dropped: %lld\n",mNumVideoFramesDropped);
         fprintf(mFileOut, "Number of frames rendered: %llu\n",mTotalRenderingFrames);
         fprintf(mFileOut, "Percentage dropped: %.2f\n",
-                           mTotalFrames == 0 ? 0.0 : (double)mNumVideoFramesDropped / mTotalFrames);
+                           mTotalFrames == 0 ? 0.0 : (double)mNumVideoFramesDropped / (double)mTotalFrames);
         fprintf(mFileOut, "=====================================================\n");
     }
 }
@@ -164,7 +164,7 @@ void DashPlayerStats::recordLate(int64_t ts, int64_t clock, int64_t delta, int64
     mNumVideoFramesDropped++;
     mConsecutiveFramesDropped++;
     if (mConsecutiveFramesDropped == 1){
-      mCatchupTimeStart = anchorTime;
+      mCatchupTimeStart = (uint32_t)anchorTime;
     }
 
     logLate(ts,clock,delta);
@@ -182,9 +182,9 @@ void DashPlayerStats::logSyncLoss() {
         Mutex::Autolock autoLock(mStatsLock);
         fprintf(mFileOut, "=====================================================\n");
         fprintf(mFileOut, "Number of times AV Sync Losses = %u\n", mNumTimesSyncLoss);
-        fprintf(mFileOut, "Max Video Ahead time delta = %u\n", -mMaxEarlyDelta/1000);
-        fprintf(mFileOut, "Max Video Behind time delta = %u\n", mMaxLateDelta/1000);
-        fprintf(mFileOut, "Max Time sync loss = %u\n",mMaxTimeSyncLoss/1000);
+        fprintf(mFileOut, "Max Video Ahead time delta = %lld\n", -mMaxEarlyDelta/1000);
+        fprintf(mFileOut, "Max Video Behind time delta = %lld\n", mMaxLateDelta/1000);
+        fprintf(mFileOut, "Max Time sync loss = %lld\n",mMaxTimeSyncLoss/1000);
         fprintf(mFileOut, "=====================================================\n");
     }
 }
@@ -202,9 +202,9 @@ void DashPlayerStats::logFps() {
         mTotalTime = now - mFirstFrameTime;
         int64_t diff = now - mLastFrameUs;
         if (diff > 250000 && !mVeryFirstFrame && !mBufferingEvent) {
-             double fps =((mTotalRenderingFrames - mLastFrame) * 1E6)/diff;
+             double fps =((double)(mTotalRenderingFrames - mLastFrame) * 1E6)/(double)diff;
              if (mStatisticsFrames == 0) {
-                 fps =((mTotalRenderingFrames - mLastFrame - 1) * 1E6)/diff;
+                 fps =((double)(mTotalRenderingFrames - mLastFrame - 1) * 1E6)/(double)diff;
              }
              fprintf(mFileOut, "Frames per second: %.4f, Duration of measurement: %lld\n", fps,diff);
              mFPSSumUs += fps;
@@ -256,7 +256,7 @@ inline void DashPlayerStats::logFirstFrame() {
     mVeryFirstFrame = false;
 }
 
-inline void DashPlayerStats::logCatchUp(int64_t ts, int64_t clock, int64_t delta) {
+inline void DashPlayerStats::logCatchUp(int64_t ts, int64_t clock, int64_t /*delta*/) {
     if (mConsecutiveFramesDropped > 0) {
         mNumTimesSyncLoss++;
         if (mMaxTimeSyncLoss < (clock - mCatchupTimeStart) && clock > 0 && ts > 0) {
