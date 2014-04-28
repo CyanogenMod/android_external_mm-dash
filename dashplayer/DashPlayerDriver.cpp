@@ -139,7 +139,7 @@ status_t DashPlayerDriver::prepare() {
 }
 
 status_t DashPlayerDriver::prepareAsync() {
-    status_t err = UNKNOWN_ERROR;
+    status_t err = (status_t)UNKNOWN_ERROR;
     if (mPlayer != NULL) {
         err = mPlayer->prepareAsync();
     }
@@ -252,7 +252,7 @@ status_t DashPlayerDriver::getCurrentPosition(int *msec) {
     if (mPositionUs < 0) {
         *msec = 0;
     } else {
-        *msec = (mPositionUs + 500ll) / 1000;
+        *msec = (int)((mPositionUs + 500ll) / 1000);
     }
 
     return OK;
@@ -264,7 +264,7 @@ status_t DashPlayerDriver::getDuration(int *msec) {
     if (mDurationUs < 0) {
         *msec = 0;
     } else {
-        *msec = (mDurationUs + 500ll) / 1000;
+        *msec = (int)((mDurationUs + 500ll) / 1000);
     }
 
     return OK;
@@ -288,7 +288,7 @@ status_t DashPlayerDriver::reset() {
     return OK;
 }
 
-status_t DashPlayerDriver::setLooping(int loop) {
+status_t DashPlayerDriver::setLooping(int /*loop*/) {
     return INVALID_OPERATION;
 }
 
@@ -403,8 +403,7 @@ void DashPlayerDriver::setAudioSink(const sp<AudioSink> &audioSink) {
 }
 
 status_t DashPlayerDriver::setParameter(int key, const Parcel &request) {
-
-    status_t err = UNKNOWN_ERROR;
+    status_t err = (status_t)UNKNOWN_ERROR;
     if (mPlayer != NULL)
     {
         err = mPlayer->setParameter(key, request);
@@ -414,7 +413,7 @@ status_t DashPlayerDriver::setParameter(int key, const Parcel &request) {
 
 status_t DashPlayerDriver::getParameter(int key, Parcel *reply) {
 
-    status_t err = UNKNOWN_ERROR;
+    status_t err = (status_t)UNKNOWN_ERROR;
     if (mPlayer != NULL)
     {
         err = mPlayer->getParameter(key, reply);
@@ -423,7 +422,7 @@ status_t DashPlayerDriver::getParameter(int key, Parcel *reply) {
 }
 
 status_t DashPlayerDriver::getMetadata(
-        const media::Metadata::Filter& ids, Parcel *records) {
+        const media::Metadata::Filter& /*ids*/, Parcel * /*records*/) {
     return INVALID_OPERATION;
 }
 

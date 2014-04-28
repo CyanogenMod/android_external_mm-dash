@@ -74,7 +74,7 @@ void DashPacketSource::updateFormat(const sp<MetaData> &meta) {
 DashPacketSource::~DashPacketSource() {
 }
 
-status_t DashPacketSource::start(MetaData *params) {
+status_t DashPacketSource::start(MetaData * /*params*/) {
     return OK;
 }
 
@@ -181,7 +181,7 @@ void DashPacketSource::queueAccessUnit(const sp<ABuffer> &buffer) {
 
     int64_t timeUs;
     CHECK(buffer->meta()->findInt64("timeUs", &timeUs));
-    DPS_MSG_LOW("queueAccessUnit timeUs=%lld us (%.2f secs)", timeUs, timeUs / 1E6);
+    DPS_MSG_LOW("queueAccessUnit timeUs=%lld us (%.2f secs)", timeUs, (double)timeUs / 1E6);
 
     Mutex::Autolock autoLock(mLock);
     mBuffers.push_back(buffer);
@@ -190,7 +190,7 @@ void DashPacketSource::queueAccessUnit(const sp<ABuffer> &buffer) {
 }
 
 int DashPacketSource::getQueueSize() {
-    return mBuffers.size();
+    return (int)mBuffers.size();
 }
 
 void DashPacketSource::queueDiscontinuity(

@@ -29,10 +29,10 @@ namespace android {
 
 class DashPlayerFactory : public MediaPlayerFactory::IFactory {
   public:
-    virtual float scoreFactory(const sp<IMediaPlayer>& client,
+    virtual float scoreFactory(const sp<IMediaPlayer>& /*client*/,
                                const char* url,
                                float curScore) {
-        static const float kOurScore = 0.8;
+        static const float kOurScore = 0.8f;
 
         if (kOurScore <= curScore)
             return 0.0;
@@ -50,9 +50,9 @@ class DashPlayerFactory : public MediaPlayerFactory::IFactory {
         return 0.0;
     }
 
-    virtual float scoreFactory(const sp<IMediaPlayer>& client,
-                               const sp<IStreamSource> &source,
-                               float curScore) {
+    virtual float scoreFactory(const sp<IMediaPlayer>& /*client*/,
+                               const sp<IStreamSource>& /*source*/,
+                               float /*curScore*/) {
         return 0.0;
     }
 
