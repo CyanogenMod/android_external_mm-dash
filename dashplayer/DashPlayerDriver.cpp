@@ -382,8 +382,8 @@ status_t DashPlayerDriver::invoke(const Parcel &request, Parcel *reply) {
        {
          // Ignore the invoke call for INVOKE_ID_GET_TRACK_INFO with success return code
          // to avoid mediaplayer java exception
-         DPD_MSG_ERROR("Ignore requested method INVOKE_ID_GET_TRACK_INFO to invoke");
-         ret = OK;
+         DPD_MSG_ERROR("Calling INVOKE_ID_GET_TRACK_INFO to invoke");
+         ret = getParameter(methodId,reply);
          break;
        }
 
