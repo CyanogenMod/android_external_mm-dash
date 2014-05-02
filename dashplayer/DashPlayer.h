@@ -129,6 +129,7 @@ private:
           KEY_DURATION                      = 19,
           KEY_START_OFFSET                  = 20,
           KEY_SUB_ATOM                      = 21,
+          KEY_TEXT_FORMAT                   = 22,
           KEY_GLOBAL_SETTING                = 101,
           KEY_LOCAL_SETTING                 = 102,
           KEY_START_CHAR                    = 103,
@@ -205,12 +206,23 @@ private:
         SHUT_DOWN,
     };
 
+    //Should be in sync with QCTimedText.java
     enum FrameFlags {
          TIMED_TEXT_FLAG_FRAME = 0x00,
-         TIMED_TEXT_FLAG_CODEC_CONFIG_FRAME,
+         TIMED_TEXT_FLAG_CODEC_CONFIG,
+         TIMED_TEXT_FLAG_DISCONTINUITY,
          TIMED_TEXT_FLAG_EOS,
          TIMED_TEXT_FLAG_END = TIMED_TEXT_FLAG_EOS,
     };
+
+    //Currently we only support SMPTE and CEA
+    enum TimedTextType {
+        TIMED_TEXT_SMPTE,
+        TIMED_TEXT_CEA,
+        TIMED_TEXT_UNKNOWN,
+    };
+
+    TimedTextType mTimedTextType;
 
     // Once the current flush is complete this indicates whether the
     // notion of time has changed.
@@ -296,7 +308,10 @@ private:
     List<QueueEntry> mDecoderMessageQueue;
 
     int mLogLevel;
+    bool mTimedTextCEAPresent;
 
+    //Set and reset in cases of seek/resume-out-of-tsb to signal discontinuity in CEA timedtextsamples
+    bool mTimedTextCEASamplesDisc;
 
     DISALLOW_EVIL_CONSTRUCTORS(DashPlayer);
 };
