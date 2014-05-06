@@ -290,6 +290,7 @@ struct DashCodec::OutputPortSettingsChangedState : public DashCodec::BaseState {
 protected:
     virtual PortMode getPortMode(OMX_U32 portIndex);
     virtual bool onMessageReceived(const sp<AMessage> &msg);
+    virtual void enableOutputPort(OMX_U32 data1, OMX_U32 data2);
     virtual void stateEntered();
 
     virtual bool onOMXEvent(OMX_EVENTTYPE event, OMX_U32 data1, OMX_U32 data2);
@@ -4115,13 +4116,74 @@ bool DashCodec::OutputPortSettingsChangedState::onMessageReceived(
             handled = true;
             break;
         }
+        case kWhatWaitForPortEnable:
+        {
+            int32_t d1;
+            int32_t d2;
+            CHECK(msg->findInt32("data1", &d1));
+            CHECK(msg->findInt32("data2", &d2));
 
+            enableOutputPort((OMX_U32)d1, (OMX_U32)d2);
+
+            handled = true;
+            break;
+        }
         default:
             handled = BaseState::onMessageReceived(msg);
             break;
     }
 
     return handled;
+}
+
+void DashCodec::OutputPortSettingsChangedState::enableOutputPort(OMX_U32 data1, OMX_U32 data2) {
+     if (data1 == (OMX_U32)OMX_CommandPortDisable) {
+          CHECK_EQ(data2, (OMX_U32)kPortIndexOutput);
+
+          DC_MSG_ERROR("[%s] Output port now disabled.",
+                      mCodec->mComponentName.c_str());
+          // All buffers should get freed before sending re-enabling outport after
+	  // portsetting change. OUT Buffers OWNED_BY_DOWNSTREAM, gets  freed
+	  // only when renderer sends buffer for rendering.
+	  // Due to timing issue, buffers OWNED_BY_DOWNSTREAM dosent get freed
+	  // before exectution reaches here. hence wait for all such buffers
+	  // to get free and then proceed for enabling outport.
+          if(!mCodec->mBuffers[kPortIndexOutput].isEmpty())
+          {
+             DC_MSG_ERROR(" Wait for outport Queue to be empty before re-enable port ");
+             sp<AMessage> msg = new AMessage(kWhatWaitForPortEnable, mCodec->id());
+             msg->setInt32("data1", data1);
+             msg->setInt32("data2", data2);
+             msg->post(10000ll); // Poll again after 10 ms
+             return;
+          }
+
+          mCodec->mDealer[kPortIndexOutput].clear();
+
+          CHECK_EQ(mCodec->mOMX->sendCommand(
+                   mCodec->mNode, OMX_CommandPortEnable, kPortIndexOutput),
+                   (status_t)OK);
+
+          status_t err;
+          if ((err = mCodec->allocateBuffersOnPort(kPortIndexOutput)) != OK) {
+            DC_MSG_ERROR("Failed to allocate output port buffers after "
+                  "port reconfiguration (error 0x%08x)",
+                   err);
+
+            mCodec->signalError(OMX_ErrorUndefined, err);
+
+            // This is technically not correct, but appears to be
+            // the only way to free the component instance.
+            // Controlled transitioning from excecuting->idle
+            // and idle->loaded seem impossible probably because
+            // the output port never finishes re-enabling.
+            mCodec->mShutdownInProgress = true;
+            mCodec->mKeepComponentAllocated = false;
+            mCodec->changeState(mCodec->mLoadedState);
+        }
+    }
+
+    return;
 }
 
 void DashCodec::OutputPortSettingsChangedState::stateEntered() {
@@ -4135,37 +4197,7 @@ bool DashCodec::OutputPortSettingsChangedState::onOMXEvent(
         case OMX_EventCmdComplete:
         {
             if (data1 == (OMX_U32)OMX_CommandPortDisable) {
-                CHECK_EQ(data2, (OMX_U32)kPortIndexOutput);
-
-                DC_MSG_LOW("[%s] Output port now disabled.",
-                        mCodec->mComponentName.c_str());
-
-                CHECK(mCodec->mBuffers[kPortIndexOutput].isEmpty());
-                mCodec->mDealer[kPortIndexOutput].clear();
-
-                CHECK_EQ(mCodec->mOMX->sendCommand(
-                            mCodec->mNode, OMX_CommandPortEnable, kPortIndexOutput),
-                         (status_t)OK);
-
-                status_t err;
-                if ((err = mCodec->allocateBuffersOnPort(
-                                kPortIndexOutput)) != OK) {
-                    DC_MSG_ERROR("Failed to allocate output port buffers after "
-                         "port reconfiguration (error 0x%08x)",
-                         err);
-
-                    mCodec->signalError(OMX_ErrorUndefined, err);
-
-                    // This is technically not correct, but appears to be
-                    // the only way to free the component instance.
-                    // Controlled transitioning from excecuting->idle
-                    // and idle->loaded seem impossible probably because
-                    // the output port never finishes re-enabling.
-                    mCodec->mShutdownInProgress = true;
-                    mCodec->mKeepComponentAllocated = false;
-                    mCodec->changeState(mCodec->mLoadedState);
-                }
-
+                enableOutputPort(data1, data2);
                 return true;
             } else if (data1 == (OMX_U32)OMX_CommandPortEnable) {
                 CHECK_EQ(data2, (OMX_U32)kPortIndexOutput);
