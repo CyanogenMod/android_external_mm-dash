@@ -1152,10 +1152,7 @@ status_t DashCodec::configureCodec(
             }
             int32_t maxWidth = MAX_WIDTH;
             int32_t maxHeight = MAX_HEIGHT;
-            /* temperary: disable Adaptive playback if
-               persist.dash.dbm.enable is set 0
-               TO DO: remove this when Dynamic buffering is working in video FW */
-            if (mAdaptivePlayback && mEnableDynamicBuffering) {
+            if (mAdaptivePlayback) {
                 DC_MSG_HIGH("[%s] prepareForAdaptivePlayback(%ldx%ld)",
                       mComponentName.c_str(), maxWidth, maxHeight);
 
@@ -1171,12 +1168,6 @@ status_t DashCodec::configureCodec(
                   DC_MSG_MEDIUM("[%s] prepareForAdaptivePlayback : Success",
                         mComponentName.c_str(), err);
                 }
-            }
-            else
-            {
-              DC_MSG_ERROR("[%s] prepareForAdaptivePlayback() not enabled",
-                      mComponentName.c_str());
-
             }
             // allow failure
             err = OK;
