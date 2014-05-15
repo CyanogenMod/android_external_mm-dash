@@ -48,6 +48,10 @@
 #define MAX_WIDTH 1920;
 #define MAX_HEIGHT 1080;
 
+//max 720p resolution
+#define MAX_HD_WIDTH 1280;
+#define MAX_HD_HEIGHT 720;
+
 //Min resolution QVGA
 #define MIN_WIDTH 480;
 #define MIN_HEIGHT 320;
@@ -1154,6 +1158,15 @@ status_t DashCodec::configureCodec(
             int32_t maxWidth = MAX_WIDTH;
             int32_t maxHeight = MAX_HEIGHT;
             if (mAdaptivePlayback) {
+                // 8916 HEVC SW decoder supports only 720P resolution
+                if (strcmp(mime,"video/hevc")!= 0) {
+                    char platform_name[PROPERTY_VALUE_MAX];
+                    property_get("ro.board.platform", platform_name, "0");
+                    if (!strncmp(platform_name, "msm8916",7)) {
+                        maxWidth = MAX_HD_WIDTH;
+                        maxHeight =  MAX_HD_HEIGHT;
+                    }
+                }
                 DC_MSG_HIGH("[%s] prepareForAdaptivePlayback(%ldx%ld)",
                       mComponentName.c_str(), maxWidth, maxHeight);
 
