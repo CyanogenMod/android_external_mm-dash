@@ -446,6 +446,14 @@ void DashPlayer::Renderer::onDrainVideoQueue() {
 
     bool tooLate = (mVideoLateByUs > mAVSyncDelayWindowUs);
 
+    if (tooLate && !mHasAudio)
+    {
+        DPR_MSG_HIGH("video only - resetting anchortime");
+        mAnchorTimeMediaUs = mediaTimeUs;
+        mAnchorTimeRealUs = ALooper::GetNowUs();
+        tooLate = false;
+    }
+
     if (tooLate) {
         DPR_MSG_HIGH("video late by %lld us (%.2f secs)",
              mVideoLateByUs, (double)mVideoLateByUs / 1E6);
