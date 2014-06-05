@@ -708,6 +708,13 @@ void DashPlayer::onMessageReceived(const sp<AMessage> &msg) {
                 }
             } else if (what == DashCodec::kWhatShutdownCompleted) {
                 DP_MSG_ERROR("%s shutdown completed", mTrackName);
+
+                if((track == kAudio && mFlushingAudio == SHUT_DOWN)
+                  || (track == kVideo && mFlushingVideo == SHUT_DOWN))
+                {
+                  return;
+                }
+
                 if (track == kAudio) {
                     DP_MSG_ERROR("@@@@:: Dashplayer :: MESSAGE FROM DASHCODEC +++++++++++++++++++++++++++++++ kWhatShutdownCompleted:: audio");
                     if (mAudioDecoder != NULL) {
@@ -715,7 +722,6 @@ void DashPlayer::onMessageReceived(const sp<AMessage> &msg) {
                     }
                     mAudioDecoder.clear();
 
-                    CHECK_EQ((int)mFlushingAudio, (int)SHUTTING_DOWN_DECODER);
                     mFlushingAudio = SHUT_DOWN;
                 } else if (track == kVideo) {
                     DP_MSG_ERROR("@@@@:: Dashplayer :: MESSAGE FROM DASHCODEC +++++++++++++++++++++++++++++++ kWhatShutdownCompleted:: Video");
@@ -724,7 +730,6 @@ void DashPlayer::onMessageReceived(const sp<AMessage> &msg) {
                     }
                     mVideoDecoder.clear();
 
-                    CHECK_EQ((int)mFlushingVideo, (int)SHUTTING_DOWN_DECODER);
                     mFlushingVideo = SHUT_DOWN;
                 }
 
