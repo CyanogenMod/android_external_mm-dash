@@ -16,14 +16,10 @@
 
 //#define LOG_NDEBUG 0
 #define LOG_TAG "DashPlayerRenderer"
-#include <utils/Log.h>
 
 #include "DashPlayerRenderer.h"
-
-#include <media/stagefright/foundation/ABuffer.h>
-#include <media/stagefright/foundation/ADebug.h>
-#include <media/stagefright/foundation/AMessage.h>
 #include <cutils/properties.h>
+#include <utils/Log.h>
 
 #define DPR_MSG_ERROR(...) ALOGE(__VA_ARGS__)
 #define DPR_MSG_HIGH(...) if(mLogLevel >= 1){ALOGE(__VA_ARGS__);}
@@ -272,7 +268,7 @@ bool DashPlayer::Renderer::onDrainAudioQueue() {
     {
        QueueEntry *entry = &*mAudioQueue.begin();
        if (entry->mBuffer == NULL) {
-        ALOGE("onDrainAudioQueue process EOS");
+        DPR_MSG_ERROR("onDrainAudioQueue process EOS");
         notifyEOS(true /* audio */, entry->mFinalResult);
 
         mAudioQueue.erase(mAudioQueue.begin());
@@ -287,15 +283,6 @@ bool DashPlayer::Renderer::onDrainAudioQueue() {
 
     ssize_t numFramesAvailableToWrite =
         mAudioSink->frameCount() - (mNumFramesWritten - numFramesPlayed);
-
-#if 0
-    if (numFramesAvailableToWrite == mAudioSink->frameCount()) {
-        DPR_MSG_HIGH("audio sink underrun");
-    } else {
-        DPR_MSG_LOW("audio queue has %d frames left to play",
-             mAudioSink->frameCount() - numFramesAvailableToWrite);
-    }
-#endif
 
     size_t numBytesAvailableToWrite =
         numFramesAvailableToWrite * mAudioSink->frameSize();
@@ -328,11 +315,9 @@ bool DashPlayer::Renderer::onDrainAudioQueue() {
                 mNumFramesWritten - numFramesPlayed;
 
             int64_t realTimeOffsetUs =
-                (int64_t)(((float)mAudioSink->latency() / 2  /* XXX */
+                (int64_t)(((float)mAudioSink->latency() / 2
                     + (float)numFramesPendingPlayout
                         * mAudioSink->msecsPerFrame()) * 1000ll);
-
-            // DPR_MSG_HIGH("realTimeOffsetUs = %lld us", realTimeOffsetUs);
 
             mAnchorTimeRealUs =
                 ALooper::GetNowUs() + realTimeOffsetUs;

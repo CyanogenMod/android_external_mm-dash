@@ -23,20 +23,16 @@
 
 #include "DashCodec.h"
 #include "QCMediaDefs.h"
-
 #include <binder/MemoryDealer.h>
-
 #include <media/stagefright/foundation/hexdump.h>
 #include <media/stagefright/foundation/ABuffer.h>
 #include <media/stagefright/foundation/ADebug.h>
 #include <media/stagefright/foundation/AMessage.h>
-
 #include <media/stagefright/MediaCodecList.h>
 #include <media/stagefright/MediaDefs.h>
 #include <media/stagefright/NativeWindowWrapper.h>
 #include <media/stagefright/OMXClient.h>
 #include <media/stagefright/OMXCodec.h>
-
 #include <media/hardware/HardwareAPI.h>
 #include <OMX_QCOMExtns.h>
 #include <OMX_Component.h>
@@ -55,10 +51,6 @@
 //max 720p resolution
 #define MAX_HD_WIDTH 1280;
 #define MAX_HD_HEIGHT 720;
-
-//Min resolution QVGA
-#define MIN_WIDTH 480;
-#define MIN_HEIGHT 320;
 
 #define DC_MSG_ERROR(...) ALOGE(__VA_ARGS__)
 #define DC_MSG_HIGH(...) if(mLogLevel >= 1){ALOGE(__VA_ARGS__);}
@@ -392,10 +384,7 @@ DashCodec::DashCodec()
       mNode(NULL),
       mSentFormat(false),
       mPostFormat(false),
-      mIsEncoder(false),
       mShutdownInProgress(false),
-      mEncoderDelay(0),
-      mEncoderPadding(0),
       mChannelMaskPresent(false),
       mChannelMask(0),
       mDequeueCounter(0),
@@ -476,10 +465,6 @@ void DashCodec::initiateShutdown(bool keepComponentAllocated) {
     msg->post();
 }
 
-void DashCodec::signalRequestIDRFrame() {
-    (new AMessage(kWhatRequestIDRFrame, id()))->post();
-}
-
 status_t DashCodec::allocateBuffersOnPort(OMX_U32 portIndex) {
     CHECK(portIndex == kPortIndexInput || portIndex == kPortIndexOutput);
 
@@ -547,27 +532,7 @@ status_t DashCodec::allocateBuffersOnPort(OMX_U32 portIndex) {
         }
     }
 
-    if (err != OK) {
-        return err;
-    }
-
-    sp<AMessage> notify = mNotify->dup();
-    notify->setInt32("what", DashCodec::kWhatBuffersAllocated);
-
-    notify->setInt32("portIndex", portIndex);
-
-    sp<PortDescription> desc = new PortDescription;
-
-    for (size_t i = 0; i < mBuffers[portIndex].size(); ++i) {
-        const BufferInfo &info = mBuffers[portIndex][i];
-
-        desc->addBuffer(info.mBufferID, info.mData);
-    }
-
-    notify->setObject("portDesc", desc);
-    notify->post();
-
-    return OK;
+    return err;
 }
 
 status_t DashCodec::configureOutputBuffersFromNativeWindow(
@@ -953,48 +918,46 @@ DashCodec::BufferInfo *DashCodec::findBufferByID(
     return NULL;
 }
 
-status_t DashCodec::setComponentRole(
-        bool isEncoder, const char *mime) {
+status_t DashCodec::setComponentRole(const char *mime) {
     struct MimeToRole {
         const char *mime;
         const char *decoderRole;
-        const char *encoderRole;
     };
 
     static const MimeToRole kMimeToRole[] = {
         { MEDIA_MIMETYPE_AUDIO_MPEG,
-            "audio_decoder.mp3", "audio_encoder.mp3" },
+            "audio_decoder.mp3" },
         { MEDIA_MIMETYPE_AUDIO_MPEG_LAYER_I,
-            "audio_decoder.mp1", "audio_encoder.mp1" },
+            "audio_decoder.mp1" },
         { MEDIA_MIMETYPE_AUDIO_MPEG_LAYER_II,
-            "audio_decoder.mp2", "audio_encoder.mp2" },
+            "audio_decoder.mp2" },
         { MEDIA_MIMETYPE_AUDIO_AMR_NB,
-            "audio_decoder.amrnb", "audio_encoder.amrnb" },
+            "audio_decoder.amrnb" },
         { MEDIA_MIMETYPE_AUDIO_AMR_WB,
-            "audio_decoder.amrwb", "audio_encoder.amrwb" },
+            "audio_decoder.amrwb" },
         // commenting out AMR_WM_PLUS for bringing up dash on MR2
         /* { MEDIA_MIMETYPE_AUDIO_AMR_WB_PLUS,
-            "audio_decoder.amrwbplus", "audio_encoder.amrwbplus" }, */
+            "audio_decoder.amrwbplus" }, */
         { MEDIA_MIMETYPE_AUDIO_AAC,
-            "audio_decoder.aac", "audio_encoder.aac" },
+            "audio_decoder.aac" },
         { MEDIA_MIMETYPE_AUDIO_VORBIS,
-            "audio_decoder.vorbis", "audio_encoder.vorbis" },
+            "audio_decoder.vorbis" },
         { MEDIA_MIMETYPE_AUDIO_G711_MLAW,
-            "audio_decoder.g711mlaw", "audio_encoder.g711mlaw" },
+            "audio_decoder.g711mlaw" },
         { MEDIA_MIMETYPE_AUDIO_G711_ALAW,
-            "audio_decoder.g711alaw", "audio_encoder.g711alaw" },
+            "audio_decoder.g711alaw" },
         { MEDIA_MIMETYPE_VIDEO_AVC,
-            "video_decoder.avc", "video_encoder.avc" },
+            "video_decoder.avc" },
         { MEDIA_MIMETYPE_VIDEO_MPEG4,
-            "video_decoder.mpeg4", "video_encoder.mpeg4" },
+            "video_decoder.mpeg4" },
         { MEDIA_MIMETYPE_VIDEO_H263,
-            "video_decoder.h263", "video_encoder.h263" },
+            "video_decoder.h263" },
         { MEDIA_MIMETYPE_AUDIO_RAW,
-            "audio_decoder.raw", "audio_encoder.raw" },
+            "audio_decoder.raw" },
         { MEDIA_MIMETYPE_AUDIO_FLAC,
-            "audio_decoder.flac", "audio_encoder.flac" },
+            "audio_decoder.flac" },
         { MEDIA_MIMETYPE_VIDEO_HEVC,
-            "video_decoder.hevc", "video_encoder.hevc" },
+            "video_decoder.hevc" },
     };
 
     static const size_t kNumMimeToRole =
@@ -1011,9 +974,7 @@ status_t DashCodec::setComponentRole(
         return ERROR_UNSUPPORTED;
     }
 
-    const char *role =
-        isEncoder ? kMimeToRole[i].encoderRole
-                  : kMimeToRole[i].decoderRole;
+    const char *role = kMimeToRole[i].decoderRole;
 
     if (role != NULL) {
         OMX_PARAM_COMPONENTROLETYPE roleParams;
@@ -1041,69 +1002,11 @@ status_t DashCodec::setComponentRole(
 
 status_t DashCodec::configureCodec(
         const char *mime, const sp<AMessage> &msg) {
-    int32_t encoder;
-    if (!msg->findInt32("encoder", &encoder)) {
-        encoder = false;
-    }
 
-    mIsEncoder = encoder;
-
-    status_t err = setComponentRole(encoder /* isEncoder */, mime);
+    status_t err = setComponentRole(mime);
 
     if (err != OK) {
         return err;
-    }
-
-    int32_t bitRate = 0;
-    // FLAC encoder doesn't need a bitrate, other encoders do
-    if (encoder && strcasecmp(mime, MEDIA_MIMETYPE_AUDIO_FLAC)
-            && !msg->findInt32("bitrate", &bitRate)) {
-        return INVALID_OPERATION;
-    }
-
-    int32_t storeMeta;
-    if (encoder
-            && msg->findInt32("store-metadata-in-buffers", &storeMeta)
-            && storeMeta != 0) {
-        err = mOMX->storeMetaDataInBuffers(mNode, kPortIndexInput, OMX_TRUE);
-
-        if (err != OK) {
-            DC_MSG_ERROR("[%s] storeMetaDataInBuffers failed w/ err %d",
-                  mComponentName.c_str(), err);
-
-            return err;
-        }
-        else
-        {
-          DC_MSG_ERROR("[%s] storeMetaDataInBuffers succedded", mComponentName.c_str());
-        }
-    }
-
-    int32_t prependSPSPPS;
-    if (encoder
-            && msg->findInt32("prepend-sps-pps-to-idr-frames", &prependSPSPPS)
-            && prependSPSPPS != 0) {
-        OMX_INDEXTYPE index;
-        err = mOMX->getExtensionIndex(
-                mNode,
-                "OMX.google.android.index.prependSPSPPSToIDRFrames",
-                &index);
-
-        if (err == OK) {
-            PrependSPSPPSToIDRFramesParams params;
-            InitOMXParams(&params);
-            params.bEnable = OMX_TRUE;
-
-            err = mOMX->setParameter(
-                    mNode, index, &params, sizeof(params));
-        }
-
-        if (err != OK) {
-            DC_MSG_ERROR("Encoder could not be configured to emit SPS/PPS before "
-                  "IDR frames. (err %d)", err);
-
-            return err;
-        }
     }
 
     // Always try to enable dynamic output buffers on native surface
@@ -1120,20 +1023,18 @@ status_t DashCodec::configureCodec(
     char property_value[PROPERTY_VALUE_MAX];
     property_value[0] = '\0';
     property_get("persist.dash.dbm.enable", property_value, "1");
-    if(*property_value)
-    {
+    if(*property_value) {
       mEnableDynamicBuffering = atoi(property_value) > 0 ? true: false;
       DC_MSG_ERROR("DynamicBuffering is set to [%d]", mEnableDynamicBuffering);
     }
-      if (!encoder && video && haveNativeWindow) {
 
-        if (mEnableDynamicBuffering)
-        {
-          DC_MSG_ERROR("Enabling Dynamic Buffering Mode");
-          err = mOMX->storeMetaDataInBuffers(mNode, kPortIndexOutput, OMX_TRUE);
+    if (video && haveNativeWindow) {
+
+        if (mEnableDynamicBuffering) {
+            DC_MSG_ERROR("Enabling Dynamic Buffering Mode");
+            err = mOMX->storeMetaDataInBuffers(mNode, kPortIndexOutput, OMX_TRUE);
         }
-        else
-        {
+        else {
             DC_MSG_ERROR("Disabling Dynamic Buffering Mode Thru SetProp");
             err =  INVALID_OPERATION;
         }
@@ -1175,20 +1076,17 @@ status_t DashCodec::configureCodec(
                         maxHeight =  MAX_HD_HEIGHT;
                     }
                 }
-                DC_MSG_HIGH("[%s] prepareForAdaptivePlayback(%ldx%ld)",
+                DC_MSG_HIGH("[%s] prepareForAdaptivePlayback(%d%d)",
                       mComponentName.c_str(), maxWidth, maxHeight);
 
                 err = mOMX->prepareForAdaptivePlayback(
                         mNode, kPortIndexOutput, OMX_TRUE, maxWidth, maxHeight);
-                if (err != OK)
-                {
-                  ALOGE("[%s] prepareForAdaptivePlayback failed w/ err %d",
-                         mComponentName.c_str(), err);
-                }
-                else
-                {
-                  ALOGV("[%s] prepareForAdaptivePlayback : Success",
-                        mComponentName.c_str(), err);
+                if (err != OK) {
+                    DC_MSG_ERROR("[%s] prepareForAdaptivePlayback failed w/ err %d",
+                          mComponentName.c_str(), err);
+                } else {
+                    DC_MSG_HIGH("[%s] prepareForAdaptivePlayback : Success %d",
+                          mComponentName.c_str(), err);
                 }
             }
             // allow failure
@@ -1203,12 +1101,10 @@ status_t DashCodec::configureCodec(
                 && push != 0) {
             mFlags |= kFlagPushBlankBuffersToNativeWindowOnShutdown;
         }
-      }
-    if (!strncasecmp(mime, "video/", 6)) {
-        if (encoder) {
-            err = setupVideoEncoder(mime, msg);
-        } else {
-            int32_t width, height;
+    }
+
+    if (video) {
+        int32_t width, height;
             if (!msg->findInt32("width", &width)
                     || !msg->findInt32("height", &height)) {
                 err = INVALID_OPERATION;
@@ -1220,23 +1116,20 @@ status_t DashCodec::configureCodec(
                 }
                 err = setupVideoDecoder(mime, width, height);
 
-                //Enable component support to extract SEI extradata if present in AVC stream
-                QOMX_ENABLETYPE extra_data;
-                extra_data.bEnable = OMX_TRUE;
+            //Enable component support to extract SEI extradata if present in AVC stream
+            QOMX_ENABLETYPE extra_data;
+            extra_data.bEnable = OMX_TRUE;
 
-                status_t errVal = mOMX->setParameter(
+            status_t errVal = mOMX->setParameter(
                         mNode, (OMX_INDEXTYPE)OMX_QcomIndexEnableExtnUserData,
                         (OMX_PTR)&extra_data, sizeof(extra_data));
 
-                if (errVal != OK) {
-                        DC_MSG_ERROR("[%s] setting OMX_QcomIndexEnableExtnUserData failed: %d",
-                                mComponentName.c_str(), err);
-                    }
-                else
-                {
-                  DC_MSG_ERROR("[%s] setting OMX_QcomIndexEnableExtnUserData success",
-                                mComponentName.c_str());
-                }
+            if (errVal != OK) {
+                DC_MSG_ERROR("[%s] setting OMX_QcomIndexEnableExtnUserData failed: %d",
+                mComponentName.c_str(), err);
+            } else {
+                DC_MSG_ERROR("[%s] setting OMX_QcomIndexEnableExtnUserData success",
+                mComponentName.c_str());
             }
         }
     } else if (!strcasecmp(mime, MEDIA_MIMETYPE_AUDIO_AAC)) {
@@ -1254,12 +1147,12 @@ status_t DashCodec::configureCodec(
             }
 
             err = setupAACCodec(
-                    encoder, numChannels, sampleRate, bitRate, aacProfile, isADTS != 0);
+                    numChannels, sampleRate, 0, aacProfile, isADTS != 0);
         }
     } else if (!strcasecmp(mime, MEDIA_MIMETYPE_AUDIO_AMR_NB)) {
-        err = setupAMRCodec(encoder, false /* isWAMR */, bitRate);
+        err = setupAMRCodec(false /* isWAMR */, 0);
     } else if (!strcasecmp(mime, MEDIA_MIMETYPE_AUDIO_AMR_WB)) {
-        err = setupAMRCodec(encoder, true /* isWAMR */, bitRate);
+        err = setupAMRCodec(true /* isWAMR */, 0);
     } else if (!strcasecmp(mime, MEDIA_MIMETYPE_AUDIO_G711_ALAW)
             || !strcasecmp(mime, MEDIA_MIMETYPE_AUDIO_G711_MLAW)) {
         // These are PCM-like formats with a fixed sample rate but
@@ -1269,46 +1162,19 @@ status_t DashCodec::configureCodec(
         if (!msg->findInt32("channel-count", &numChannels)) {
             err = INVALID_OPERATION;
         } else {
-            err = setupG711Codec(encoder, numChannels);
+            err = setupG711Codec(numChannels);
         }
     } else if (!strcasecmp(mime, MEDIA_MIMETYPE_AUDIO_FLAC)) {
         int32_t numChannels = 0, sampleRate = 0, compressionLevel = -1;
-        if (encoder &&
-                (!msg->findInt32("channel-count", &numChannels)
-                        || !msg->findInt32("sample-rate", &sampleRate))) {
-            DC_MSG_ERROR("missing channel count or sample rate for FLAC encoder");
-            err = INVALID_OPERATION;
-        } else {
-            if (encoder) {
-                if (!msg->findInt32("flac-compression-level", &compressionLevel)) {
-                    compressionLevel = 5;// default FLAC compression level
-                } else if (compressionLevel < 0) {
-                    DC_MSG_HIGH("compression level %d outside [0..8] range, using 0", compressionLevel);
-                    compressionLevel = 0;
-                } else if (compressionLevel > 8) {
-                    DC_MSG_HIGH("compression level %d outside [0..8] range, using 8", compressionLevel);
-                    compressionLevel = 8;
-                }
-            }
-            err = setupFlacCodec(encoder, numChannels, sampleRate, compressionLevel);
-        }
+        err = setupFlacCodec(numChannels, sampleRate, compressionLevel);
     } else if (!strcasecmp(mime, MEDIA_MIMETYPE_AUDIO_RAW)) {
         int32_t numChannels =0 , sampleRate = 0;
-        if (encoder
-                || !msg->findInt32("channel-count", &numChannels)
+        if (!msg->findInt32("channel-count", &numChannels)
                 || !msg->findInt32("sample-rate", &sampleRate)) {
             err = INVALID_OPERATION;
         } else {
             err = setupRawAudioFormat(kPortIndexInput, sampleRate, numChannels);
         }
-    }
-
-    if (!msg->findInt32("encoder-delay", &mEncoderDelay)) {
-        mEncoderDelay = 0;
-    }
-
-    if (!msg->findInt32("encoder-padding", &mEncoderPadding)) {
-        mEncoderPadding = 0;
     }
 
     if (msg->findInt32("channel-mask", &mChannelMask)) {
@@ -1364,109 +1230,16 @@ status_t DashCodec::setMinBufferSize(OMX_U32 portIndex, size_t size) {
     return OK;
 }
 
-status_t DashCodec::selectAudioPortFormat(
-        OMX_U32 portIndex, OMX_AUDIO_CODINGTYPE desiredFormat) {
-    OMX_AUDIO_PARAM_PORTFORMATTYPE format;
-    InitOMXParams(&format);
-
-    format.nPortIndex = portIndex;
-    for (OMX_U32 index = 0;; ++index) {
-        format.nIndex = index;
-
-        status_t err = mOMX->getParameter(
-                mNode, OMX_IndexParamAudioPortFormat,
-                &format, sizeof(format));
-
-        if (err != OK) {
-            return err;
-        }
-
-        if (format.eEncoding == desiredFormat) {
-            break;
-        }
-    }
-
-    return mOMX->setParameter(
-            mNode, OMX_IndexParamAudioPortFormat, &format, sizeof(format));
-}
-
 status_t DashCodec::setupAACCodec(
-        bool encoder, int32_t numChannels, int32_t sampleRate,
+        int32_t numChannels, int32_t sampleRate,
         int32_t bitRate, int32_t aacProfile, bool isADTS) {
-    if (encoder && isADTS) {
-        return -EINVAL;
-    }
 
-    status_t err = setupRawAudioFormat(
-            encoder ? kPortIndexInput : kPortIndexOutput,
+     status_t err = setupRawAudioFormat(
+            kPortIndexOutput,
             sampleRate,
             numChannels);
 
     if (err != OK) {
-        return err;
-    }
-
-    if (encoder) {
-        err = selectAudioPortFormat(kPortIndexOutput, OMX_AUDIO_CodingAAC);
-
-        if (err != OK) {
-            return err;
-        }
-
-        OMX_PARAM_PORTDEFINITIONTYPE def;
-        InitOMXParams(&def);
-        def.nPortIndex = kPortIndexOutput;
-
-        err = mOMX->getParameter(
-                mNode, OMX_IndexParamPortDefinition, &def, sizeof(def));
-
-        if (err != OK) {
-            return err;
-        }
-
-        def.format.audio.bFlagErrorConcealment = OMX_TRUE;
-        def.format.audio.eEncoding = OMX_AUDIO_CodingAAC;
-
-        err = mOMX->setParameter(
-                mNode, OMX_IndexParamPortDefinition, &def, sizeof(def));
-
-        if (err != OK) {
-            return err;
-        }
-
-        OMX_AUDIO_PARAM_AACPROFILETYPE profile;
-        InitOMXParams(&profile);
-        profile.nPortIndex = kPortIndexOutput;
-
-        err = mOMX->getParameter(
-                mNode, OMX_IndexParamAudioAac, &profile, sizeof(profile));
-
-        if (err != OK) {
-            return err;
-        }
-
-        profile.nChannels = numChannels;
-
-        profile.eChannelMode =
-            (numChannels == 1)
-                ? OMX_AUDIO_ChannelModeMono: OMX_AUDIO_ChannelModeStereo;
-
-        profile.nSampleRate = sampleRate;
-        profile.nBitRate = bitRate;
-        profile.nAudioBandWidth = 0;
-        profile.nFrameLength = 0;
-        profile.nAACtools = OMX_AUDIO_AACToolAll;
-        profile.nAACERtools = OMX_AUDIO_AACERNone;
-        profile.eAACProfile = (OMX_AUDIO_AACPROFILETYPE) aacProfile;
-        profile.eAACStreamFormat = OMX_AUDIO_AACStreamFormatMP4FF;
-
-        err = mOMX->setParameter(
-                mNode, OMX_IndexParamAudioAac, &profile, sizeof(profile));
-
-        if (err != OK) {
-            return err;
-        }
-
         return err;
     }
 
@@ -1538,10 +1311,10 @@ static OMX_AUDIO_AMRBANDMODETYPE pickModeFromBitRate(
     }
 }
 
-status_t DashCodec::setupAMRCodec(bool encoder, bool isWAMR, int32_t bitrate) {
+status_t DashCodec::setupAMRCodec(bool isWAMR, int32_t bitrate) {
     OMX_AUDIO_PARAM_AMRTYPE def;
     InitOMXParams(&def);
-    def.nPortIndex = encoder ? kPortIndexOutput : kPortIndexInput;
+    def.nPortIndex = kPortIndexInput;
 
     status_t err =
         mOMX->getParameter(mNode, OMX_IndexParamAudioAmr, &def, sizeof(def));
@@ -1561,42 +1334,21 @@ status_t DashCodec::setupAMRCodec(bool encoder, bool isWAMR, int32_t bitrate) {
     }
 
     return setupRawAudioFormat(
-            encoder ? kPortIndexInput : kPortIndexOutput,
+            kPortIndexOutput,
             isWAMR ? 16000 : 8000 /* sampleRate */,
             1 /* numChannels */);
 }
 
-status_t DashCodec::setupG711Codec(bool encoder, int32_t numChannels) {
-    CHECK(!encoder);  // XXX TODO
-
+status_t DashCodec::setupG711Codec(int32_t numChannels) {
     return setupRawAudioFormat(
             kPortIndexInput, 8000 /* sampleRate */, numChannels);
 }
 
 status_t DashCodec::setupFlacCodec(
-        bool encoder, int32_t numChannels, int32_t sampleRate, int32_t compressionLevel) {
-
-    if (encoder) {
-        OMX_AUDIO_PARAM_FLACTYPE def;
-        InitOMXParams(&def);
-        def.nPortIndex = kPortIndexOutput;
-
-        // configure compression level
-        status_t err = mOMX->getParameter(mNode, OMX_IndexParamAudioFlac, &def, sizeof(def));
-        if (err != OK) {
-            DC_MSG_ERROR("setupFlacCodec(): Error %d getting OMX_IndexParamAudioFlac parameter", err);
-            return err;
-        }
-        def.nCompressionLevel = compressionLevel;
-        err = mOMX->setParameter(mNode, OMX_IndexParamAudioFlac, &def, sizeof(def));
-        if (err != OK) {
-            DC_MSG_ERROR("setupFlacCodec(): Error %d setting OMX_IndexParamAudioFlac parameter", err);
-            return err;
-        }
-    }
+        int32_t numChannels, int32_t sampleRate, int32_t compressionLevel) {
 
     return setupRawAudioFormat(
-            encoder ? kPortIndexInput : kPortIndexOutput,
+            kPortIndexOutput,
             sampleRate,
             numChannels);
 }
@@ -1668,24 +1420,6 @@ status_t DashCodec::setVideoPortFormatType(
 
         if (err != OK) {
             return err;
-        }
-
-        // The following assertion is violated by TI's video decoder.
-        // CHECK_EQ(format.nIndex, index);
-
-        if (!strcmp("OMX.TI.Video.encoder", mComponentName.c_str())) {
-            if (portIndex == kPortIndexInput
-                    && colorFormat == format.eColorFormat) {
-                // eCompressionFormat does not seem right.
-                found = true;
-                break;
-            }
-            if (portIndex == kPortIndexOutput
-                    && compressionFormat == format.eCompressionFormat) {
-                // eColorFormat does not seem right.
-                found = true;
-                break;
-            }
         }
 
         if (format.eCompressionFormat == compressionFormat
@@ -1791,503 +1525,6 @@ status_t DashCodec::setupVideoDecoder(
     }
 
     return OK;
-}
-
-status_t DashCodec::setupVideoEncoder(const char *mime, const sp<AMessage> &msg) {
-    int32_t tmp;
-    if (!msg->findInt32("color-format", &tmp)) {
-        return INVALID_OPERATION;
-    }
-
-    OMX_COLOR_FORMATTYPE colorFormat =
-        static_cast<OMX_COLOR_FORMATTYPE>(tmp);
-
-    status_t err = setVideoPortFormatType(
-            kPortIndexInput, OMX_VIDEO_CodingUnused, colorFormat);
-
-    if (err != OK) {
-        DC_MSG_ERROR("[%s] does not support color format %d",
-              mComponentName.c_str(), colorFormat);
-
-        return err;
-    }
-
-    /* Input port configuration */
-
-    OMX_PARAM_PORTDEFINITIONTYPE def;
-    InitOMXParams(&def);
-
-    OMX_VIDEO_PORTDEFINITIONTYPE *video_def = &def.format.video;
-
-    def.nPortIndex = kPortIndexInput;
-
-    err = mOMX->getParameter(
-            mNode, OMX_IndexParamPortDefinition, &def, sizeof(def));
-
-    if (err != OK) {
-        return err;
-    }
-
-    int32_t width, height, bitrate;
-    if (!msg->findInt32("width", &width)
-            || !msg->findInt32("height", &height)
-            || !msg->findInt32("bitrate", &bitrate)) {
-        return INVALID_OPERATION;
-    }
-
-    video_def->nFrameWidth = width;
-    video_def->nFrameHeight = height;
-
-    int32_t stride;
-    if (!msg->findInt32("stride", &stride)) {
-        stride = width;
-    }
-
-    video_def->nStride = stride;
-
-    int32_t sliceHeight;
-    if (!msg->findInt32("slice-height", &sliceHeight)) {
-        sliceHeight = height;
-    }
-
-    video_def->nSliceHeight = sliceHeight;
-
-    def.nBufferSize = (video_def->nStride * video_def->nSliceHeight * 3) / 2;
-
-    float frameRate;
-    if (!msg->findFloat("frame-rate", &frameRate)) {
-        int32_t tmp;
-        if (!msg->findInt32("frame-rate", &tmp)) {
-            return INVALID_OPERATION;
-        }
-        frameRate = (float)tmp;
-    }
-
-    video_def->xFramerate = (OMX_U32)(frameRate * 65536.0f);
-    video_def->eCompressionFormat = OMX_VIDEO_CodingUnused;
-    video_def->eColorFormat = colorFormat;
-
-    err = mOMX->setParameter(
-            mNode, OMX_IndexParamPortDefinition, &def, sizeof(def));
-
-    if (err != OK) {
-        DC_MSG_ERROR("[%s] failed to set input port definition parameters.",
-              mComponentName.c_str());
-
-        return err;
-    }
-
-    /* Output port configuration */
-
-    OMX_VIDEO_CODINGTYPE compressionFormat;
-    err = GetVideoCodingTypeFromMime(mime, &compressionFormat);
-
-    if (err != OK) {
-        return err;
-    }
-
-    err = setVideoPortFormatType(
-            kPortIndexOutput, compressionFormat, OMX_COLOR_FormatUnused);
-
-    if (err != OK) {
-        DC_MSG_ERROR("[%s] does not support compression format %d",
-             mComponentName.c_str(), compressionFormat);
-
-        return err;
-    }
-
-    def.nPortIndex = kPortIndexOutput;
-
-    err = mOMX->getParameter(
-            mNode, OMX_IndexParamPortDefinition, &def, sizeof(def));
-
-    if (err != OK) {
-        return err;
-    }
-
-    video_def->nFrameWidth = width;
-    video_def->nFrameHeight = height;
-    video_def->xFramerate = 0;
-    video_def->nBitrate = bitrate;
-    video_def->eCompressionFormat = compressionFormat;
-    video_def->eColorFormat = OMX_COLOR_FormatUnused;
-
-    err = mOMX->setParameter(
-            mNode, OMX_IndexParamPortDefinition, &def, sizeof(def));
-
-    if (err != OK) {
-        DC_MSG_ERROR("[%s] failed to set output port definition parameters.",
-              mComponentName.c_str());
-
-        return err;
-    }
-
-    switch (compressionFormat) {
-        case OMX_VIDEO_CodingMPEG4:
-            err = setupMPEG4EncoderParameters(msg);
-            break;
-
-        case OMX_VIDEO_CodingH263:
-            err = setupH263EncoderParameters(msg);
-            break;
-
-        case OMX_VIDEO_CodingAVC:
-            err = setupAVCEncoderParameters(msg);
-            break;
-
-        default:
-            break;
-    }
-
-    DC_MSG_HIGH("setupVideoEncoder succeeded");
-
-    return err;
-}
-
-static OMX_U32 setPFramesSpacing(int32_t iFramesInterval, int32_t frameRate) {
-    if (iFramesInterval < 0) {
-        return 0xFFFFFFFF;
-    } else if (iFramesInterval == 0) {
-        return 0;
-    }
-    OMX_U32 ret = frameRate * iFramesInterval;
-    CHECK(ret > 1);
-    return ret;
-}
-
-static OMX_VIDEO_CONTROLRATETYPE getBitrateMode(const sp<AMessage> &msg) {
-    int32_t tmp;
-    if (!msg->findInt32("bitrate-mode", &tmp)) {
-        return OMX_Video_ControlRateVariable;
-    }
-
-    return static_cast<OMX_VIDEO_CONTROLRATETYPE>(tmp);
-}
-
-status_t DashCodec::setupMPEG4EncoderParameters(const sp<AMessage> &msg) {
-    int32_t bitrate, iFrameInterval;
-    if (!msg->findInt32("bitrate", &bitrate)
-            || !msg->findInt32("i-frame-interval", &iFrameInterval)) {
-        return INVALID_OPERATION;
-    }
-
-    OMX_VIDEO_CONTROLRATETYPE bitrateMode = getBitrateMode(msg);
-
-    float frameRate;
-    if (!msg->findFloat("frame-rate", &frameRate)) {
-        int32_t tmp;
-        if (!msg->findInt32("frame-rate", &tmp)) {
-            return INVALID_OPERATION;
-        }
-        frameRate = (float)tmp;
-    }
-
-    OMX_VIDEO_PARAM_MPEG4TYPE mpeg4type;
-    InitOMXParams(&mpeg4type);
-    mpeg4type.nPortIndex = kPortIndexOutput;
-
-    status_t err = mOMX->getParameter(
-            mNode, OMX_IndexParamVideoMpeg4, &mpeg4type, sizeof(mpeg4type));
-
-    if (err != OK) {
-        return err;
-    }
-
-    mpeg4type.nSliceHeaderSpacing = 0;
-    mpeg4type.bSVH = OMX_FALSE;
-    mpeg4type.bGov = OMX_FALSE;
-
-    mpeg4type.nAllowedPictureTypes =
-        OMX_VIDEO_PictureTypeI | OMX_VIDEO_PictureTypeP;
-
-    mpeg4type.nPFrames = setPFramesSpacing(iFrameInterval, (int32_t)frameRate);
-    if (mpeg4type.nPFrames == 0) {
-        mpeg4type.nAllowedPictureTypes = OMX_VIDEO_PictureTypeI;
-    }
-    mpeg4type.nBFrames = 0;
-    mpeg4type.nIDCVLCThreshold = 0;
-    mpeg4type.bACPred = OMX_TRUE;
-    mpeg4type.nMaxPacketSize = 256;
-    mpeg4type.nTimeIncRes = 1000;
-    mpeg4type.nHeaderExtension = 0;
-    mpeg4type.bReversibleVLC = OMX_FALSE;
-
-    int32_t profile;
-    if (msg->findInt32("profile", &profile)) {
-        int32_t level;
-        if (!msg->findInt32("level", &level)) {
-            return INVALID_OPERATION;
-        }
-
-        err = verifySupportForProfileAndLevel(profile, level);
-
-        if (err != OK) {
-            return err;
-        }
-
-        mpeg4type.eProfile = static_cast<OMX_VIDEO_MPEG4PROFILETYPE>(profile);
-        mpeg4type.eLevel = static_cast<OMX_VIDEO_MPEG4LEVELTYPE>(level);
-    }
-
-    err = mOMX->setParameter(
-            mNode, OMX_IndexParamVideoMpeg4, &mpeg4type, sizeof(mpeg4type));
-
-    if (err != OK) {
-        return err;
-    }
-
-    err = configureBitrate(bitrate, bitrateMode);
-
-    if (err != OK) {
-        return err;
-    }
-
-    return setupErrorCorrectionParameters();
-}
-
-status_t DashCodec::setupH263EncoderParameters(const sp<AMessage> &msg) {
-    int32_t bitrate, iFrameInterval;
-    if (!msg->findInt32("bitrate", &bitrate)
-            || !msg->findInt32("i-frame-interval", &iFrameInterval)) {
-        return INVALID_OPERATION;
-    }
-
-    OMX_VIDEO_CONTROLRATETYPE bitrateMode = getBitrateMode(msg);
-
-    float frameRate;
-    if (!msg->findFloat("frame-rate", &frameRate)) {
-        int32_t tmp;
-        if (!msg->findInt32("frame-rate", &tmp)) {
-            return INVALID_OPERATION;
-        }
-        frameRate = (float)tmp;
-    }
-
-    OMX_VIDEO_PARAM_H263TYPE h263type;
-    InitOMXParams(&h263type);
-    h263type.nPortIndex = kPortIndexOutput;
-
-    status_t err = mOMX->getParameter(
-            mNode, OMX_IndexParamVideoH263, &h263type, sizeof(h263type));
-
-    if (err != OK) {
-        return err;
-    }
-
-    h263type.nAllowedPictureTypes =
-        OMX_VIDEO_PictureTypeI | OMX_VIDEO_PictureTypeP;
-
-    h263type.nPFrames = setPFramesSpacing(iFrameInterval, (int32_t)frameRate);
-    if (h263type.nPFrames == 0) {
-        h263type.nAllowedPictureTypes = OMX_VIDEO_PictureTypeI;
-    }
-    h263type.nBFrames = 0;
-
-    int32_t profile;
-    if (msg->findInt32("profile", &profile)) {
-        int32_t level;
-        if (!msg->findInt32("level", &level)) {
-            return INVALID_OPERATION;
-        }
-
-        err = verifySupportForProfileAndLevel(profile, level);
-
-        if (err != OK) {
-            return err;
-        }
-
-        h263type.eProfile = static_cast<OMX_VIDEO_H263PROFILETYPE>(profile);
-        h263type.eLevel = static_cast<OMX_VIDEO_H263LEVELTYPE>(level);
-    }
-
-    h263type.bPLUSPTYPEAllowed = OMX_FALSE;
-    h263type.bForceRoundingTypeToZero = OMX_FALSE;
-    h263type.nPictureHeaderRepetition = 0;
-    h263type.nGOBHeaderInterval = 0;
-
-    err = mOMX->setParameter(
-            mNode, OMX_IndexParamVideoH263, &h263type, sizeof(h263type));
-
-    if (err != OK) {
-        return err;
-    }
-
-    err = configureBitrate(bitrate, bitrateMode);
-
-    if (err != OK) {
-        return err;
-    }
-
-    return setupErrorCorrectionParameters();
-}
-
-status_t DashCodec::setupAVCEncoderParameters(const sp<AMessage> &msg) {
-    int32_t bitrate, iFrameInterval;
-    if (!msg->findInt32("bitrate", &bitrate)
-            || !msg->findInt32("i-frame-interval", &iFrameInterval)) {
-        return INVALID_OPERATION;
-    }
-
-    OMX_VIDEO_CONTROLRATETYPE bitrateMode = getBitrateMode(msg);
-
-    float frameRate;
-    if (!msg->findFloat("frame-rate", &frameRate)) {
-        int32_t tmp;
-        if (!msg->findInt32("frame-rate", &tmp)) {
-            return INVALID_OPERATION;
-        }
-        frameRate = (float)tmp;
-    }
-
-    OMX_VIDEO_PARAM_AVCTYPE h264type;
-    InitOMXParams(&h264type);
-    h264type.nPortIndex = kPortIndexOutput;
-
-    status_t err = mOMX->getParameter(
-            mNode, OMX_IndexParamVideoAvc, &h264type, sizeof(h264type));
-
-    if (err != OK) {
-        return err;
-    }
-
-    h264type.nAllowedPictureTypes =
-        OMX_VIDEO_PictureTypeI | OMX_VIDEO_PictureTypeP;
-
-    int32_t profile;
-    if (msg->findInt32("profile", &profile)) {
-        int32_t level;
-        if (!msg->findInt32("level", &level)) {
-            return INVALID_OPERATION;
-        }
-
-        err = verifySupportForProfileAndLevel(profile, level);
-
-        if (err != OK) {
-            return err;
-        }
-
-        h264type.eProfile = static_cast<OMX_VIDEO_AVCPROFILETYPE>(profile);
-        h264type.eLevel = static_cast<OMX_VIDEO_AVCLEVELTYPE>(level);
-    }
-
-    // XXX
-    if (h264type.eProfile != OMX_VIDEO_AVCProfileBaseline) {
-        DC_MSG_HIGH("Use baseline profile instead of %d for AVC recording",
-            h264type.eProfile);
-        h264type.eProfile = OMX_VIDEO_AVCProfileBaseline;
-    }
-
-    if (h264type.eProfile == OMX_VIDEO_AVCProfileBaseline) {
-        h264type.nSliceHeaderSpacing = 0;
-        h264type.bUseHadamard = OMX_TRUE;
-        h264type.nRefFrames = 1;
-        h264type.nBFrames = 0;
-        h264type.nPFrames = setPFramesSpacing(iFrameInterval, (int32_t)frameRate);
-        if (h264type.nPFrames == 0) {
-            h264type.nAllowedPictureTypes = OMX_VIDEO_PictureTypeI;
-        }
-        h264type.nRefIdx10ActiveMinus1 = 0;
-        h264type.nRefIdx11ActiveMinus1 = 0;
-        h264type.bEntropyCodingCABAC = OMX_FALSE;
-        h264type.bWeightedPPrediction = OMX_FALSE;
-        h264type.bconstIpred = OMX_FALSE;
-        h264type.bDirect8x8Inference = OMX_FALSE;
-        h264type.bDirectSpatialTemporal = OMX_FALSE;
-        h264type.nCabacInitIdc = 0;
-    }
-
-    if (h264type.nBFrames != 0) {
-        h264type.nAllowedPictureTypes |= OMX_VIDEO_PictureTypeB;
-    }
-
-    h264type.bEnableUEP = OMX_FALSE;
-    h264type.bEnableFMO = OMX_FALSE;
-    h264type.bEnableASO = OMX_FALSE;
-    h264type.bEnableRS = OMX_FALSE;
-    h264type.bFrameMBsOnly = OMX_TRUE;
-    h264type.bMBAFF = OMX_FALSE;
-    h264type.eLoopFilterMode = OMX_VIDEO_AVCLoopFilterEnable;
-
-    err = mOMX->setParameter(
-            mNode, OMX_IndexParamVideoAvc, &h264type, sizeof(h264type));
-
-    if (err != OK) {
-        return err;
-    }
-
-    return configureBitrate(bitrate, bitrateMode);
-}
-
-status_t DashCodec::verifySupportForProfileAndLevel(
-        int32_t profile, int32_t level) {
-    OMX_VIDEO_PARAM_PROFILELEVELTYPE params;
-    InitOMXParams(&params);
-    params.nPortIndex = kPortIndexOutput;
-
-    for (params.nProfileIndex = 0;; ++params.nProfileIndex) {
-        status_t err = mOMX->getParameter(
-                mNode,
-                OMX_IndexParamVideoProfileLevelQuerySupported,
-                &params,
-                sizeof(params));
-
-        if (err != OK) {
-            return err;
-        }
-
-        int32_t supportedProfile = static_cast<int32_t>(params.eProfile);
-        int32_t supportedLevel = static_cast<int32_t>(params.eLevel);
-
-        if (profile == supportedProfile && level <= supportedLevel) {
-            return OK;
-        }
-    }
-}
-
-status_t DashCodec::configureBitrate(
-        int32_t bitrate, OMX_VIDEO_CONTROLRATETYPE bitrateMode) {
-    OMX_VIDEO_PARAM_BITRATETYPE bitrateType;
-    InitOMXParams(&bitrateType);
-    bitrateType.nPortIndex = kPortIndexOutput;
-
-    status_t err = mOMX->getParameter(
-            mNode, OMX_IndexParamVideoBitrate,
-            &bitrateType, sizeof(bitrateType));
-
-    if (err != OK) {
-        return err;
-    }
-
-    bitrateType.eControlRate = bitrateMode;
-    bitrateType.nTargetBitrate = bitrate;
-
-    return mOMX->setParameter(
-            mNode, OMX_IndexParamVideoBitrate,
-            &bitrateType, sizeof(bitrateType));
-}
-
-status_t DashCodec::setupErrorCorrectionParameters() {
-    OMX_VIDEO_PARAM_ERRORCORRECTIONTYPE errorCorrectionType;
-    InitOMXParams(&errorCorrectionType);
-    errorCorrectionType.nPortIndex = kPortIndexOutput;
-
-    status_t err = mOMX->getParameter(
-            mNode, OMX_IndexParamVideoErrorCorrection,
-            &errorCorrectionType, sizeof(errorCorrectionType));
-
-    if (err != OK) {
-        return OK;  // Optional feature. Ignore this failure
-    }
-
-    errorCorrectionType.bEnableHEC = OMX_FALSE;
-    errorCorrectionType.bEnableResync = OMX_TRUE;
-    errorCorrectionType.nResynchMarkerSpacing = 256;
-    errorCorrectionType.bEnableDataPartitioning = OMX_FALSE;
-    errorCorrectionType.bEnableRVLC = OMX_FALSE;
-
-    return mOMX->setParameter(
-            mNode, OMX_IndexParamVideoErrorCorrection,
-            &errorCorrectionType, sizeof(errorCorrectionType));
 }
 
 status_t DashCodec::setVideoFormatOnPort(
@@ -2584,17 +1821,6 @@ void DashCodec::sendFormatChange() {
             notify->setString("mime", MEDIA_MIMETYPE_AUDIO_RAW);
             notify->setInt32("channel-count", params.nChannels);
             notify->setInt32("sample-rate", params.nSamplingRate);
-            if (mEncoderDelay + mEncoderPadding) {
-                size_t frameSize = params.nChannels * sizeof(int16_t);
-                if (mSkipCutBuffer != NULL) {
-                    size_t prevbufsize = mSkipCutBuffer->size();
-                    if (prevbufsize != 0) {
-                        DC_MSG_HIGH("Replacing SkipCutBuffer holding %d bytes", prevbufsize);
-                    }
-                }
-                mSkipCutBuffer = new SkipCutBuffer((int32_t)(mEncoderDelay * frameSize),
-                                                   (int32_t)(mEncoderPadding * frameSize));
-            }
 
             if (mChannelMaskPresent) {
                 notify->setInt32("channel-mask", mChannelMask);
@@ -2768,24 +1994,6 @@ error:
 ////////////////////////////////////////////////////////////////////////////////
 
 DashCodec::PortDescription::PortDescription() {
-}
-
-status_t DashCodec::requestIDRFrame() {
-    if (!mIsEncoder) {
-        return ERROR_UNSUPPORTED;
-    }
-
-    OMX_CONFIG_INTRAREFRESHVOPTYPE params;
-    InitOMXParams(&params);
-
-    params.nPortIndex = kPortIndexOutput;
-    params.IntraRefreshVOP = OMX_TRUE;
-
-    return mOMX->setConfig(
-            mNode,
-            OMX_IndexConfigVideoIntraVOPRefresh,
-            &params,
-            sizeof(params));
 }
 
 void DashCodec::PortDescription::addBuffer(
@@ -3201,13 +2409,6 @@ void DashCodec::BaseState::getMoreInputDataIfPossible() {
     for (size_t i = 0; i < mCodec->mBuffers[kPortIndexInput].size(); ++i) {
         BufferInfo *info = &mCodec->mBuffers[kPortIndexInput].editItemAt(i);
 
-#if 0
-        if (info->mStatus == BufferInfo::OWNED_BY_UPSTREAM) {
-            // There's already a "read" pending.
-            return;
-        }
-#endif
-
         if (info->mStatus == BufferInfo::OWNED_BY_US) {
             eligible = info;
         }
@@ -3286,18 +2487,12 @@ bool DashCodec::BaseState::onOMXFillBufferDone(
                 mCodec->mPortEOS[kPortIndexOutput] = true;
                 break;
             }
-            if (!mCodec->mIsEncoder && !mCodec->mSentFormat && !mCodec->mAdaptivePlayback) {
+            if (!mCodec->mSentFormat && !mCodec->mAdaptivePlayback) {
                 mCodec->sendFormatChange();
             }
 
             if (mCodec->mNativeWindow == NULL) {
                 info->mData->setRange(rangeOffset, rangeLength);
-
-#if 0
-                if (IsIDR(info->mData)) {
-                    DC_MSG_HIGH("IDR frame");
-                }
-#endif
             }
 
             if (mCodec->mSkipCutBuffer != NULL) {
@@ -3311,42 +2506,38 @@ bool DashCodec::BaseState::onOMXFillBufferDone(
             notify->setBuffer("buffer", info->mData);
             notify->setInt32("flags", flags);
 
-            if (flags & OMX_BUFFERFLAG_EXTRADATA)
-            {
-              OMX_U8* bufferHandle = NULL;
-              int64_t nFilledLen = 0;
-              int64_t nAllocLen = 0;
-              int64_t nStartOffset = 0;
+            if (flags & OMX_BUFFERFLAG_EXTRADATA) {
+                OMX_U8* bufferHandle = NULL;
+                int64_t nFilledLen = 0;
+                int64_t nAllocLen = 0;
+                int64_t nStartOffset = 0;
 
-              OMX_BUFFERHEADERTYPE *pBufHdr = (OMX_BUFFERHEADERTYPE *)bufferID;
+                OMX_BUFFERHEADERTYPE *pBufHdr = (OMX_BUFFERHEADERTYPE *)bufferID;
 
-              nStartOffset = pBufHdr->nOffset;
+                nStartOffset = pBufHdr->nOffset;
 
-              if(mCodec->mStoreMetaDataInOutputBuffers)
-              {
-                VideoDecoderOutputMetaData *metaData =
-                              reinterpret_cast<VideoDecoderOutputMetaData *>(
-                              pBufHdr->pBuffer);
+                if(mCodec->mStoreMetaDataInOutputBuffers) {
+                  VideoDecoderOutputMetaData *metaData =
+                                reinterpret_cast<VideoDecoderOutputMetaData *>(
+                                pBufHdr->pBuffer);
 
-                bufferHandle = const_cast<OMX_U8*>(
-                           reinterpret_cast<const OMX_U8*>(metaData->pHandle));
+                  bufferHandle = const_cast<OMX_U8*>(
+                             reinterpret_cast<const OMX_U8*>(metaData->pHandle));
 
 #ifdef BFAMILY_TARGET /* Venus macros and dynamic mode support present only for B-family targets.*/
-                nFilledLen = (VENUS_Y_STRIDE(COLOR_FMT_NV12, mCodec->mCurrentWidth)
-                              * VENUS_Y_SCANLINES(COLOR_FMT_NV12, mCodec->mCurrentHeight))
-                                    +  (VENUS_UV_STRIDE(COLOR_FMT_NV12, mCodec->mCurrentWidth)
-                                        * VENUS_UV_SCANLINES(COLOR_FMT_NV12, mCodec->mCurrentHeight));
+                  nFilledLen = (VENUS_Y_STRIDE(COLOR_FMT_NV12, mCodec->mCurrentWidth)
+                                * VENUS_Y_SCANLINES(COLOR_FMT_NV12, mCodec->mCurrentHeight))
+                                      +  (VENUS_UV_STRIDE(COLOR_FMT_NV12, mCodec->mCurrentWidth)
+                                          * VENUS_UV_SCANLINES(COLOR_FMT_NV12, mCodec->mCurrentHeight));
 
-                nAllocLen = VENUS_BUFFER_SIZE(COLOR_FMT_NV12, mCodec->mCurrentWidth, mCodec->mCurrentHeight);
+                  nAllocLen = VENUS_BUFFER_SIZE(COLOR_FMT_NV12, mCodec->mCurrentWidth, mCodec->mCurrentHeight);
 #endif
-              }
-              else
-              {
-                bufferHandle = const_cast<OMX_U8*>(
-                           reinterpret_cast<const OMX_U8*>(pBufHdr->pBuffer));
+              } else {
+                  bufferHandle = const_cast<OMX_U8*>(
+                             reinterpret_cast<const OMX_U8*>(pBufHdr->pBuffer));
 
-                nFilledLen = pBufHdr->nFilledLen;
-                nAllocLen = pBufHdr->nAllocLen;
+                  nFilledLen = pBufHdr->nFilledLen;
+                  nAllocLen = pBufHdr->nAllocLen;
               }
 
               DC_MSG_HIGH("[%s] Extradata present in decoded buffer."
@@ -3363,7 +2554,7 @@ bool DashCodec::BaseState::onOMXFillBufferDone(
                 new AMessage(kWhatOutputBufferDrained, mCodec->id());
 
            if (!mCodec->mPostFormat && mCodec->mAdaptivePlayback){
-                   ALOGV("Resolution will change from this buffer, set a flag");
+                   DC_MSG_HIGH("Resolution will change from this buffer, set a flag");
                    reply->setInt32("resChange", 1);
                    mCodec->mPostFormat = true;
             }
@@ -3403,7 +2594,7 @@ void DashCodec::BaseState::onOutputBufferDrained(const sp<AMessage> &msg) {
     if (mCodec->mAdaptivePlayback) {
         int32_t resChange = 0;
         if (msg->findInt32("resChange", &resChange) && resChange == 1) {
-            ALOGV("Resolution change is sent to native window now ");
+            DC_MSG_HIGH("Resolution change is sent to native window now ");
             mCodec->sendFormatChange();
             msg->setInt32("resChange", 0);
         }
@@ -3563,14 +2754,9 @@ bool DashCodec::UninitializedState::onAllocateComponent(const sp<AMessage> &msg)
     } else {
         CHECK(msg->findString("mime", &mime));
 
-        int32_t encoder;
-        if (!msg->findInt32("encoder", &encoder)) {
-            encoder = false;
-        }
-
         OMXCodec::findMatchingCodecs(
                 mime.c_str(),
-                encoder, // createEncoder
+                false, // create encoder
                 NULL,  // matchComponentName
                 0,     // flags
                 &matchingCodecs);
@@ -3628,13 +2814,6 @@ bool DashCodec::UninitializedState::onAllocateComponent(const sp<AMessage> &msg)
         mCodec->mPortEOS[kPortIndexOutput] = false;
 
     mCodec->mInputEOSResult = OK;
-
-    {
-        sp<AMessage> notify = mCodec->mNotify->dup();
-        notify->setInt32("what", DashCodec::kWhatComponentAllocated);
-        notify->setString("componentName", mCodec->mComponentName.c_str());
-        notify->post();
-    }
 
     mCodec->changeState(mCodec->mLoadedState);
 
@@ -3756,12 +2935,6 @@ bool DashCodec::LoadedState::onConfigureComponent(
 
         mCodec->signalError(OMX_ErrorUndefined, err);
         return false;
-    }
-
-    {
-        sp<AMessage> notify = mCodec->mNotify->dup();
-        notify->setInt32("what", DashCodec::kWhatComponentConfigured);
-        notify->post();
     }
 
     return true;
@@ -4022,17 +3195,6 @@ bool DashCodec::ExecutingState::onMessageReceived(const sp<AMessage> &msg) {
             break;
         }
 
-        case kWhatRequestIDRFrame:
-        {
-            status_t err = mCodec->requestIDRFrame();
-            if (err != OK) {
-                DC_MSG_HIGH("Requesting an IDR frame failed.");
-            }
-
-            handled = true;
-            break;
-        }
-
         default:
             handled = BaseState::onMessageReceived(msg);
             break;
@@ -4050,7 +3212,7 @@ bool DashCodec::ExecutingState::onOMXEvent(
 
             if (data2 == 0 || data2 == OMX_IndexParamPortDefinition) {
                 if (mCodec->mStoreMetaDataInOutputBuffers) {
-                    DC_MSG_ERROR("[%s] storeMetaDataInBuffers:Rcvd port settings changed event..disabling outputport",                          mCodec->mComponentName.c_str());
+                    DC_MSG_ERROR("[%s] storeMetaDataInBuffers:Rcvd port settings changed event..disabling outputport", mCodec->mComponentName.c_str());
                 mCodec->mMetaDataBuffersToSubmit = 0;
                     CHECK_EQ(mCodec->mOMX->sendCommand(
                                 mCodec->mNode,
@@ -4060,7 +3222,7 @@ bool DashCodec::ExecutingState::onOMXEvent(
                     mCodec->freeOutputBuffersNotOwnedByComponent();
                     mCodec->changeState(mCodec->mOutputPortSettingsChangedState);
                 }else {
-                  ALOGV("Flush output port before disable");
+                  DC_MSG_HIGH("Flush output port before disable");
                   CHECK_EQ(mCodec->mOMX->sendCommand(
                         mCodec->mNode, OMX_CommandFlush, kPortIndexOutput),
                      (status_t)OK);

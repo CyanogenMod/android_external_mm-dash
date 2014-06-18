@@ -16,15 +16,12 @@
 
 //#define LOG_NDEBUG 0
 #define LOG_TAG "DashPlayerDriver"
-#include <utils/Log.h>
 
 #include "DashPlayerDriver.h"
-
 #include "DashPlayer.h"
-
-#include <media/stagefright/foundation/ADebug.h>
 #include <media/stagefright/foundation/ALooper.h>
-
+#include <cutils/properties.h>
+#include <utils/Log.h>
 
 #define DPD_MSG_ERROR(...) ALOGE(__VA_ARGS__)
 #define DPD_MSG_HIGH(...) if(mLogLevel >= 1){ALOGE(__VA_ARGS__);}
@@ -38,8 +35,6 @@ DashPlayerDriver::DashPlayerDriver()
       mSetSurfaceInProgress(false),
       mDurationUs(-1),
       mPositionUs(-1),
-      mNumFramesTotal(0),
-      mNumFramesDropped(0),
       mLooper(new ALooper),
       mState(UNINITIALIZED),
       mAtEOS(false),
@@ -293,7 +288,7 @@ status_t DashPlayerDriver::setLooping(int /*loop*/) {
 }
 
 player_type DashPlayerDriver::playerType() {
-    return NU_PLAYER;
+    return DASH_PLAYER;
 }
 
 void DashPlayerDriver::setQCTimedTextListener(const bool val) {
@@ -318,13 +313,13 @@ status_t DashPlayerDriver::invoke(const Parcel &request, Parcel *reply) {
     switch (methodId) {
        case KEY_DASH_GET_ADAPTION_PROPERTIES:
         {
-          DPD_MSG_ERROR("calling KEY_DASH_GET_ADAPTION_PROPERTIES");
+          DPD_MSG_HIGH("calling KEY_DASH_GET_ADAPTION_PROPERTIES");
           ret = getParameter(methodId,reply);
           break;
         }
         case KEY_DASH_SET_ADAPTION_PROPERTIES:
         {
-          DPD_MSG_ERROR("calling KEY_DASH_SET_ADAPTION_PROPERTIES");
+          DPD_MSG_HIGH("calling KEY_DASH_SET_ADAPTION_PROPERTIES");
           int32_t val = 0;
           ret = setParameter(methodId,request);
           val = (ret == OK)? 1:0;
@@ -334,28 +329,28 @@ status_t DashPlayerDriver::invoke(const Parcel &request, Parcel *reply) {
        }
        case KEY_DASH_MPD_QUERY:
        {
-         DPD_MSG_ERROR("calling KEY_DASH_MPD_QUERY");
+         DPD_MSG_HIGH("calling KEY_DASH_MPD_QUERY");
          ret = getParameter(methodId,reply);
          break;
        }
        case KEY_DASH_QOE_EVENT:
-           DPD_MSG_ERROR("calling KEY_DASH_QOE_EVENT");
+           DPD_MSG_HIGH("calling KEY_DASH_QOE_EVENT");
            ret = setParameter(methodId,request);
            break;
 
        case KEY_DASH_QOE_PERIODIC_EVENT:
-           DPD_MSG_ERROR("calling KEY_DASH_QOE_PERIODIC_EVENT");
+           DPD_MSG_HIGH("calling KEY_DASH_QOE_PERIODIC_EVENT");
            ret = getParameter(methodId,reply);
            break;
 
        case KEY_DASH_REPOSITION_RANGE:
-           DPD_MSG_ERROR("calling KEY_DASH_REPOSITION_RANGE");
+           DPD_MSG_HIGH("calling KEY_DASH_REPOSITION_RANGE");
            ret = getParameter(methodId,reply);
            break;
 
        case KEY_DASH_SEEK_EVENT:
        {
-          DPD_MSG_ERROR("calling KEY_DASH_SEEK_EVENT seekTo()");
+          DPD_MSG_HIGH("calling KEY_DASH_SEEK_EVENT seekTo()");
           int32_t msec;
           ret = request.readInt32(&msec);
           if (ret != OK)
@@ -374,7 +369,7 @@ status_t DashPlayerDriver::invoke(const Parcel &request, Parcel *reply) {
 
        case KEY_DASH_PAUSE_EVENT:
        {
-          DPD_MSG_ERROR("calling KEY_DASH_PAUSE_EVENT pause()");
+          DPD_MSG_HIGH("calling KEY_DASH_PAUSE_EVENT pause()");
           ret = pause();
           int32_t val = (ret == OK)? 1:0;
           reply->setDataPosition(0);
@@ -384,7 +379,7 @@ status_t DashPlayerDriver::invoke(const Parcel &request, Parcel *reply) {
 
        case KEY_DASH_RESUME_EVENT:
        {
-          ALOGV("calling KEY_DASH_RESUME_EVENT pause()");
+          DPD_MSG_HIGH("calling KEY_DASH_RESUME_EVENT pause()");
           ret = start();
           int32_t val = (ret == OK)? 1:0;
           reply->setDataPosition(0);
@@ -394,7 +389,7 @@ status_t DashPlayerDriver::invoke(const Parcel &request, Parcel *reply) {
 
        case KEY_QCTIMEDTEXT_LISTENER:
        {
-         ALOGV("calling KEY_QCTIMEDTEXT_LISTENER");
+         DPD_MSG_HIGH("calling KEY_QCTIMEDTEXT_LISTENER");
 
          int32_t val = 0;
          ret = request.readInt32(&val);
@@ -416,7 +411,7 @@ status_t DashPlayerDriver::invoke(const Parcel &request, Parcel *reply) {
        {
          // Ignore the invoke call for INVOKE_ID_GET_TRACK_INFO with success return code
          // to avoid mediaplayer java exception
-         DPD_MSG_ERROR("Calling INVOKE_ID_GET_TRACK_INFO to invoke");
+         DPD_MSG_HIGH("Calling INVOKE_ID_GET_TRACK_INFO to invoke");
          ret = getParameter(methodId,reply);
          break;
        }
@@ -487,13 +482,6 @@ void DashPlayerDriver::notifyPosition(int64_t positionUs) {
 
 void DashPlayerDriver::notifySeekComplete() {
     notifyListener(MEDIA_SEEK_COMPLETE);
-}
-
-void DashPlayerDriver::notifyFrameStats(
-        int64_t numFramesTotal, int64_t numFramesDropped) {
-    Mutex::Autolock autoLock(mLock);
-    mNumFramesTotal = numFramesTotal;
-    mNumFramesDropped = numFramesDropped;
 }
 
 status_t DashPlayerDriver::dump(int fd, const Vector<String16> &args) const {

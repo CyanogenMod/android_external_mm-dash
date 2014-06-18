@@ -16,20 +16,17 @@
 
 //#define LOG_NDEBUG 0
 #define LOG_TAG "DashPlayerDecoder"
-#include <utils/Log.h>
 
 #include "DashPlayerDecoder.h"
 #include "DashCodec.h"
 #include "ESDS.h"
 #include "QCMediaDefs.h"
 #include "QCMetaData.h"
-#include <media/stagefright/foundation/ABuffer.h>
-#include <media/stagefright/foundation/ADebug.h>
-#include <media/stagefright/foundation/AMessage.h>
 #include <media/stagefright/MediaDefs.h>
 #include <media/stagefright/MetaData.h>
 #include <media/stagefright/Utils.h>
 #include <cutils/properties.h>
+#include <utils/Log.h>
 
 #define DPD_MSG_ERROR(...) ALOGE(__VA_ARGS__)
 #define DPD_MSG_HIGH(...) if(mLogLevel >= 1){ALOGE(__VA_ARGS__);}
@@ -157,21 +154,10 @@ sp<AMessage> DashPlayer::Decoder::makeFormat(const sp<MetaData> &meta) {
     CHECK_EQ(convertMetaDataToMessage(meta, &msg), (status_t)OK);
 
     int32_t value;
-    if (meta->findInt32(kKeySmoothStreaming, &value)) {
-        msg->setInt32("smooth-streaming", value);
-    }
-
     if (meta->findInt32(kKeyIsDRM, &value)) {
         msg->setInt32("secure-op", 1);
     }
 
-    if (meta->findInt32(kKeyRequiresSecureBuffers, &value)) {
-        msg->setInt32("requires-secure-buffers", 1);
-    }
-
-    if (meta->findInt32(kKeyEnableDecodeOrder, &value)) {
-        msg->setInt32("decodeOrderEnable", value);
-    }
     if (meta->findData(kKeyAacCodecSpecificData, &type, &data, &size)) {
           if (size > 0 && data != NULL) {
               sp<ABuffer> buffer = new ABuffer(size);
@@ -208,12 +194,7 @@ void DashPlayer::Decoder::onFillThisBuffer(const sp<AMessage> &msg) {
     sp<AMessage> reply;
     CHECK(msg->findMessage("reply", &reply));
 
-#if 0
     sp<ABuffer> outBuffer;
-    CHECK(msg->findBuffer("buffer", &outBuffer));
-#else
-    sp<ABuffer> outBuffer;
-#endif
 
     if (mCSDIndex < mCSD.size()) {
         outBuffer = mCSD.editItemAt(mCSDIndex++);
