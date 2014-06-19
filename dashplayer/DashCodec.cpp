@@ -1113,6 +1113,9 @@ status_t DashCodec::configureCodec(
             obj != NULL;
     mStoreMetaDataInOutputBuffers = false;
 
+    int32_t maxWidth = MAX_WIDTH;
+    int32_t maxHeight = MAX_HEIGHT;
+
     bool mEnableDynamicBuffering = true;
     char property_value[PROPERTY_VALUE_MAX];
     property_value[0] = '\0';
@@ -1162,11 +1165,9 @@ status_t DashCodec::configureCodec(
                             (GRALLOC_USAGE_SW_READ_MASK |
                              GRALLOC_USAGE_SW_WRITE_MASK)) == 0;
             }
-            int32_t maxWidth = MAX_WIDTH;
-            int32_t maxHeight = MAX_HEIGHT;
             if (mAdaptivePlayback) {
                 // 8916 HEVC SW decoder supports only 720P resolution
-                if (strcmp(mime,"video/hevc")!= 0) {
+                if (!strcmp(mime,"video/hevc")) {
                     char platform_name[PROPERTY_VALUE_MAX];
                     property_get("ro.board.platform", platform_name, "0");
                     if (!strncmp(platform_name, "msm8916",7)) {
@@ -1214,10 +1215,9 @@ status_t DashCodec::configureCodec(
             } else {
                 //override height & width with max for smooth streaming
                 if (mAdaptivePlayback) {
-                    width = MAX_WIDTH;
-                    height = MAX_HEIGHT;
+                   width = maxWidth;
+                   height = maxHeight;
                 }
-
                 err = setupVideoDecoder(mime, width, height);
 
                 //Enable component support to extract SEI extradata if present in AVC stream
