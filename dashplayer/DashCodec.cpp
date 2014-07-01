@@ -52,6 +52,10 @@
 #define MAX_WIDTH 1920;
 #define MAX_HEIGHT 1080;
 
+//max 720p resolution
+#define MAX_HD_WIDTH 1280;
+#define MAX_HD_HEIGHT 720;
+
 //Min resolution QVGA
 #define MIN_WIDTH 480;
 #define MIN_HEIGHT 320;
@@ -1109,6 +1113,9 @@ status_t DashCodec::configureCodec(
             obj != NULL;
     mStoreMetaDataInOutputBuffers = false;
 
+    int32_t maxWidth = MAX_WIDTH;
+    int32_t maxHeight = MAX_HEIGHT;
+
     bool mEnableDynamicBuffering = true;
     char property_value[PROPERTY_VALUE_MAX];
     property_value[0] = '\0';
@@ -1158,10 +1165,17 @@ status_t DashCodec::configureCodec(
                             (GRALLOC_USAGE_SW_READ_MASK |
                              GRALLOC_USAGE_SW_WRITE_MASK)) == 0;
             }
-            int32_t maxWidth = MAX_WIDTH;
-            int32_t maxHeight = MAX_HEIGHT;
             if (mAdaptivePlayback) {
-                ALOGV("[%s] prepareForAdaptivePlayback(%ldx%ld)",
+                // 8916 HEVC SW decoder supports only 720P resolution
+                if (!strcmp(mime,"video/hevc")) {
+                    char platform_name[PROPERTY_VALUE_MAX];
+                    property_get("ro.board.platform", platform_name, "0");
+                    if (!strncmp(platform_name, "msm8916",7)) {
+                        maxWidth = MAX_HD_WIDTH;
+                        maxHeight =  MAX_HD_HEIGHT;
+                    }
+                }
+                DC_MSG_HIGH("[%s] prepareForAdaptivePlayback(%ldx%ld)",
                       mComponentName.c_str(), maxWidth, maxHeight);
 
                 err = mOMX->prepareForAdaptivePlayback(
@@ -1201,10 +1215,9 @@ status_t DashCodec::configureCodec(
             } else {
                 //override height & width with max for smooth streaming
                 if (mAdaptivePlayback) {
-                    width = MAX_WIDTH;
-                    height = MAX_HEIGHT;
+                   width = maxWidth;
+                   height = maxHeight;
                 }
-
                 err = setupVideoDecoder(mime, width, height);
 
                 //Enable component support to extract SEI extradata if present in AVC stream
