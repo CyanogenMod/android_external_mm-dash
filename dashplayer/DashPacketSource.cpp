@@ -18,12 +18,7 @@
  */
 
 #include "DashPacketSource.h"
-
-#include <media/stagefright/foundation/ABuffer.h>
-#include <media/stagefright/foundation/ADebug.h>
-#include <media/stagefright/foundation/AMessage.h>
-#include <media/stagefright/foundation/AString.h>
-#include <media/stagefright/foundation/hexdump.h>
+#include "DashPlayer.h"
 #include <media/stagefright/MediaBuffer.h>
 #include <media/stagefright/MediaDefs.h>
 #include <media/stagefright/MetaData.h>
@@ -41,9 +36,6 @@ DashPacketSource::DashPacketSource(const sp<MetaData> &meta)
     : mIsAudio(false),
       mFormat(meta),
       mEOSResult(OK),
-      mStreamPID(0),
-      mProgramPID(0),
-      mFirstPTS(0),
       mLogLevel(0) {
 
     char property_value[PROPERTY_VALUE_MAX] = {0};
@@ -79,19 +71,6 @@ status_t DashPacketSource::start(MetaData * /*params*/) {
 }
 
 status_t DashPacketSource::stop() {
-    return OK;
-}
-
-void DashPacketSource::setStreamInfo(unsigned streamPID, unsigned programPID, uint64_t firstPTS){
-    mStreamPID = streamPID;
-    mProgramPID = programPID;
-    mFirstPTS = firstPTS;
-}
-
-status_t DashPacketSource::getStreamInfo(unsigned& streamPID, unsigned& programPID, uint64_t& firstPTS){
-    streamPID = mStreamPID;
-    programPID = mProgramPID;
-    firstPTS = mFirstPTS;
     return OK;
 }
 
@@ -295,7 +274,7 @@ status_t DashPacketSource::nextBufferIsSync(bool* isSyncFrame) {
 
     *isSyncFrame = false;
     int32_t value = 0;
-    if (buffer->meta()->findInt32("isSync", &value) && (value == 1)) {
+    if (buffer->meta()->findInt32("sync", &value) && (value == 1)) {
        *isSyncFrame = true;
     }
     return OK;

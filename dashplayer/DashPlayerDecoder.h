@@ -20,7 +20,6 @@
 
 #include "DashPlayerRenderer.h"
 #include "DashPlayer.h"
-#include <media/stagefright/foundation/AHandler.h>
 
 namespace android {
 

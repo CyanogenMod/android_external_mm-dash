@@ -25,38 +25,21 @@
 #include <utils/Log.h>
 #include <dlfcn.h>  // for dlopen/dlclose
 #include "DashPlayer.h"
-#ifdef QCOM_WFD_SINK
-#include "WFDRenderer.h"
-#endif //QCOM_WFD_SINK
-//#include "HTTPLiveSource.h"
 #include "DashPlayerDecoder.h"
 #include "DashPlayerDriver.h"
 #include "DashPlayerRenderer.h"
 #include "DashPlayerSource.h"
 #include "DashCodec.h"
-//#include "RTSPSource.h"
-//#include "StreamingSource.h"
-//#include "GenericSource.h"
-
 #include "ATSParser.h"
-
-#include <media/stagefright/foundation/hexdump.h>
-#include <media/stagefright/foundation/ABuffer.h>
-#include <media/stagefright/foundation/ADebug.h>
-#include <media/stagefright/foundation/AMessage.h>
-#include <media/stagefright/foundation/AString.h>
 #include <media/stagefright/MediaDefs.h>
 #include <media/stagefright/MediaErrors.h>
 #include <media/stagefright/MetaData.h>
-#include <TextDescriptions.h>
-
 #include <gui/IGraphicBufferProducer.h>
-
-#include <cutils/properties.h>
 #include "avc_utils.h"
-
 #include "OMX_QCOMExtns.h"
 #include <gralloc_priv.h>
+#include <cutils/properties.h>
+#include <utils/Log.h>
 
 #define DP_MSG_ERROR(...) ALOGE(__VA_ARGS__)
 #define DP_MSG_HIGH(...) if(mLogLevel >= 1){ALOGE(__VA_ARGS__);}
@@ -146,11 +129,7 @@ DashPlayer::DashPlayer()
       mSkipRenderingAudioUntilMediaTimeUs(-1ll),
       mSkipRenderingVideoUntilMediaTimeUs(-1ll),
       mVideoLateByUs(0ll),
-      mNumFramesTotal(0ll),
-      mNumFramesDropped(0ll),
       mPauseIndication(false),
-      mSourceType(kDefaultSource),
-      mIsSecureInputBuffers(false),
       mSRid(0),
       mStats(NULL),
       mLogLevel(0),
@@ -213,9 +192,8 @@ status_t DashPlayer::setDataSource(
           (strlen(url) >= 4 && !strcasecmp(".mpd", &url[strlen(url) - 4]))) {
            /* Load the DASH HTTP Live source librery here */
            DP_MSG_LOW("DashPlayer setDataSource url sting %s",url);
-           source = LoadCreateSource(url, headers, mUIDValid, mUID,kHttpDashSource);
+           source = LoadCreateSource(url, headers, mUIDValid, mUID);
            if (source != NULL) {
-              mSourceType = kHttpDashSource;
               msg->setObject("source", source);
               msg->post();
               return OK;
@@ -313,9 +291,8 @@ void DashPlayer::onMessageReceived(const sp<AMessage> &msg) {
             CHECK(msg->findObject("source", &obj));
 
             mSource = static_cast<Source *>(obj.get());
-            if (mSourceType == kHttpDashSource) {
-               prepareSource();
-            }
+            prepareSource();
+
             break;
         }
 
@@ -415,8 +392,6 @@ void DashPlayer::onMessageReceived(const sp<AMessage> &msg) {
             mSkipRenderingAudioUntilMediaTimeUs = -1;
             mSkipRenderingVideoUntilMediaTimeUs = -1;
             mVideoLateByUs = 0;
-            mNumFramesTotal = 0;
-            mNumFramesDropped = 0;
             if (mSource != NULL)
             {
               mSource->start();
@@ -425,25 +400,13 @@ void DashPlayer::onMessageReceived(const sp<AMessage> &msg) {
             // for qualcomm statistics profiling
             mStats = new DashPlayerStats();
 
-#ifdef QCOM_WFD_SINK
-            if (mSourceType == kWfdSource) {
-                DP_MSG_LOW("creating WFDRenderer in NU player");
-                mRenderer = new WFDRenderer(
-                        mAudioSink,
-                        new AMessage(kWhatRendererNotify, id()));
-            }
-            else {
-#endif /* QCOM_WFD_SINK */
-                mRenderer = new Renderer(
-                        mAudioSink,
-                        new AMessage(kWhatRendererNotify, id()));
-#ifdef QCOM_WFD_SINK
-            }
-#endif /* QCOM_WFD_SINK */
-               // for qualcomm statistics profiling
-                mStats = new DashPlayerStats();
-                mRenderer->registerStats(mStats);
-                looper()->registerHandler(mRenderer);
+            mRenderer = new Renderer(
+                    mAudioSink,
+                    new AMessage(kWhatRendererNotify, id()));
+            // for qualcomm statistics profiling
+            mStats = new DashPlayerStats();
+            mRenderer->registerStats(mStats);
+            looper()->registerHandler(mRenderer);
 
             postScanSources();
             break;
@@ -460,13 +423,9 @@ void DashPlayer::onMessageReceived(const sp<AMessage> &msg) {
                 }
 
                 mScanSourcesPending = false;
-                if (mSourceType == kHttpDashSource) {
-                    DP_MSG_LOW("scanning sources haveAudio=%d, haveVideo=%d haveText=%d",
-                         mAudioDecoder != NULL, mVideoDecoder != NULL, mTextDecoder!= NULL);
-                } else {
-                    DP_MSG_LOW("scanning sources haveAudio=%d, haveVideo=%d",
-                         mAudioDecoder != NULL, mVideoDecoder != NULL);
-                }
+                DP_MSG_LOW("scanning sources haveAudio=%d, haveVideo=%d haveText=%d",
+                mAudioDecoder != NULL, mVideoDecoder != NULL, mTextDecoder!= NULL);
+
 
                 if(mNativeWindow != NULL) {
                     instantiateDecoder(kVideo, &mVideoDecoder);
@@ -475,9 +434,8 @@ void DashPlayer::onMessageReceived(const sp<AMessage> &msg) {
                 if (mAudioSink != NULL) {
                     instantiateDecoder(kAudio, &mAudioDecoder);
                 }
-                if (mSourceType == kHttpDashSource) {
-                    instantiateDecoder(kText, &mTextDecoder);
-                }
+
+                instantiateDecoder(kText, &mTextDecoder);
 
                 status_t err;
                 if ((err = mSource->feedMoreTSData()) != OK) {
@@ -493,24 +451,17 @@ void DashPlayer::onMessageReceived(const sp<AMessage> &msg) {
                     }
                     break;
                 }
-                if (mSourceType == kHttpDashSource) {
-                    if ((mAudioDecoder == NULL && mAudioSink != NULL)     ||
-                        (mVideoDecoder == NULL && mNativeWindow != NULL)  ||
-                        (mTextDecoder == NULL)) {
-                          msg->post(100000ll);
-                          mScanSourcesPending = true;
-                    }
-                } else {
-                    if ((mAudioDecoder == NULL && mAudioSink != NULL) ||
-                        (mVideoDecoder == NULL && mNativeWindow != NULL)) {
-                           msg->post(100000ll);
-                           mScanSourcesPending = true;
-                    }
-               }
-               if (mTimeDiscontinuityPending && mRenderer != NULL){
-                   mRenderer->signalTimeDiscontinuity();
-                   mTimeDiscontinuityPending = false;
-               }
+                if ((mAudioDecoder == NULL && mAudioSink != NULL)     ||
+                    (mVideoDecoder == NULL && mNativeWindow != NULL)  ||
+                    (mTextDecoder == NULL)) {
+                        msg->post(100000ll);
+                        mScanSourcesPending = true;
+                }
+
+                if (mTimeDiscontinuityPending && mRenderer != NULL){
+                    mRenderer->signalTimeDiscontinuity();
+                    mTimeDiscontinuityPending = false;
+                }
             }
             break;
         }
@@ -541,14 +492,6 @@ void DashPlayer::onMessageReceived(const sp<AMessage> &msg) {
                     break; // no need to proceed further
                 }
 
-                //if Player is in pause state, for WFD use case ,store the fill Buffer events and return back
-                if((mSourceType == kWfdSource) && (mPauseIndication)) {
-                    QueueEntry entry;
-                    entry.mMessageToBeConsumed = msg;
-                    mDecoderMessageQueue.push_back(entry);
-                    break;
-                }
-
                 status_t err = feedDecoderInputData(
                         track, codecRequest);
 
@@ -560,7 +503,7 @@ void DashPlayer::onMessageReceived(const sp<AMessage> &msg) {
                     else if(nRet == (status_t)UNKNOWN_ERROR ||
                             nRet == (status_t)ERROR_DRM_CANNOT_HANDLE) {
                       // reply back to dashcodec if there is an error
-                      ALOGE("FeedMoreTSData error on track %d ",track);
+                      DP_MSG_ERROR("FeedMoreTSData error on track %d ",track);
                       if (track == kText) {
                         sendTextPacket(NULL, (status_t)UNKNOWN_ERROR);
                       } else {
@@ -682,29 +625,6 @@ void DashPlayer::onMessageReceived(const sp<AMessage> &msg) {
                 } else if (track == kVideo) {
                     // video
                     DP_MSG_ERROR("@@@@:: Dashplayer :: MESSAGE FROM DASHCODEC +++++++++++++++++++++++++++++++ kWhatOutputFormatChanged:: video");
-                    // No need to notify JAVA layer the message of kWhatOutputFormatChanged which will cause a flicker while changing the resolution
-#if 0
-                        int32_t width, height;
-                        CHECK(codecRequest->findInt32("width", &width));
-                        CHECK(codecRequest->findInt32("height", &height));
-
-                        int32_t cropLeft, cropTop, cropRight, cropBottom;
-                        CHECK(codecRequest->findRect(
-                                    "crop",
-                                    &cropLeft, &cropTop, &cropRight, &cropBottom));
-
-                        DP_MSG_HIGH("Video output format changed to %d x %d "
-                             "(crop: %d x %d @ (%d, %d))",
-                             width, height,
-                             (cropRight - cropLeft + 1),
-                             (cropBottom - cropTop + 1),
-                             cropLeft, cropTop);
-
-                        notifyListener(
-                                MEDIA_SET_VIDEO_SIZE,
-                                cropRight - cropLeft + 1,
-                                cropBottom - cropTop + 1);
-#endif
                 }
             } else if (what == DashCodec::kWhatShutdownCompleted) {
                 DP_MSG_ERROR("%s shutdown completed", mTrackName);
@@ -797,11 +717,8 @@ void DashPlayer::onMessageReceived(const sp<AMessage> &msg) {
 
                 if ((mAudioEOS || mAudioDecoder == NULL)
                         && (mVideoEOS || mVideoDecoder == NULL)) {
-                      if ((mSourceType == kHttpDashSource) &&
-                          (finalResult == ERROR_END_OF_STREAM)) {
+                      if (finalResult == ERROR_END_OF_STREAM) {
                            notifyListener(MEDIA_PLAYBACK_COMPLETE, 0, 0);
-                      } else if (mSourceType != kHttpDashSource) {
-                         notifyListener(MEDIA_PLAYBACK_COMPLETE, 0, 0);
                       }
                 }
             } else if (what == Renderer::kWhatPosition) {
@@ -815,11 +732,7 @@ void DashPlayer::onMessageReceived(const sp<AMessage> &msg) {
                     sp<DashPlayerDriver> driver = mDriver.promote();
                     if (driver != NULL) {
                         driver->notifyPosition(positionUs);
-                        //Notify rendering position used for HLS
                         mSource->notifyRenderingPosition(positionUs);
-
-                        driver->notifyFrameStats(
-                                mNumFramesTotal, mNumFramesDropped);
                     }
                 }
             } else if (what == Renderer::kWhatFlushComplete) {
@@ -830,11 +743,6 @@ void DashPlayer::onMessageReceived(const sp<AMessage> &msg) {
                 DP_MSG_ERROR("@@@@:: Dashplayer :: MESSAGE FROM RENDERER ***************** kWhatFlushComplete:: %s",audio ? "audio" : "video");
 
             }
-            break;
-        }
-
-        case kWhatMoreDataQueued:
-        {
             break;
         }
 
@@ -902,67 +810,41 @@ void DashPlayer::onMessageReceived(const sp<AMessage> &msg) {
 
             nRet = mSource->seekTo(seekTimeUs);
 
-            if (mSourceType == kHttpLiveSource) {
-                mSource->getNewSeekTime(&newSeekTime);
-                DP_MSG_LOW("newSeekTime %lld", newSeekTime);
-            }
-            else if (mSourceType == kHttpDashSource) {
-                if (nRet == OK) { // if seek success then flush the audio,video decoder and renderer
-                  mTimeDiscontinuityPending = true;
-                  bool audPresence = false;
-                  bool vidPresence = false;
-                  bool textPresence = false;
-                  mSource->getMediaPresence(audPresence,vidPresence,textPresence);
-                  mRenderer->setMediaPresence(true,audPresence); // audio
-                  mRenderer->setMediaPresence(false,vidPresence); // video
-                  if( (mVideoDecoder != NULL) &&
-                      (mFlushingVideo == NONE || mFlushingVideo == AWAITING_DISCONTINUITY) ) {
-                      flushDecoder( false, true ); // flush video, shutdown
-                  }
-
-                 if( (mAudioDecoder != NULL) &&
-                     (mFlushingAudio == NONE|| mFlushingAudio == AWAITING_DISCONTINUITY) )
-                 {
-                     flushDecoder( true, true );  // flush audio,  shutdown
-                 }
-                 if( mAudioDecoder == NULL ) {
-                     DP_MSG_LOW("Audio is not there, set it to shutdown");
-                     mFlushingAudio = SHUT_DOWN;
-                 }
-                 if( mVideoDecoder == NULL ) {
-                     DP_MSG_LOW("Video is not there, set it to shutdown");
-                     mFlushingVideo = SHUT_DOWN;
-                 }
-               }
-               else if (nRet != PERMISSION_DENIED) {
-                      mTimeDiscontinuityPending = true;
+            if (nRet == OK) { // if seek success then flush the audio,video decoder and renderer
+                mTimeDiscontinuityPending = true;
+                bool audPresence = false;
+                bool vidPresence = false;
+                bool textPresence = false;
+                mSource->getMediaPresence(audPresence,vidPresence,textPresence);
+                mRenderer->setMediaPresence(true,audPresence); // audio
+                mRenderer->setMediaPresence(false,vidPresence); // video
+                if( (mVideoDecoder != NULL) &&
+                    (mFlushingVideo == NONE || mFlushingVideo == AWAITING_DISCONTINUITY) ) {
+                    flushDecoder( false, true ); // flush video, shutdown
                 }
-               // get the new seeked position
-               newSeekTime = seekTimeUs;
-               DP_MSG_LOW("newSeekTime %lld", newSeekTime);
 
-               mTimedTextCEASamplesDisc = true;
+                if( (mAudioDecoder != NULL) &&
+                    (mFlushingAudio == NONE|| mFlushingAudio == AWAITING_DISCONTINUITY) )
+                {
+                    flushDecoder( true, true );  // flush audio,  shutdown
+                }
+                if( mAudioDecoder == NULL ) {
+                    DP_MSG_LOW("Audio is not there, set it to shutdown");
+                    mFlushingAudio = SHUT_DOWN;
+                }
+                if( mVideoDecoder == NULL ) {
+                    DP_MSG_LOW("Video is not there, set it to shutdown");
+                    mFlushingVideo = SHUT_DOWN;
+                }
             }
-            if( (newSeekTime >= 0 ) && (mSourceType != kHttpDashSource)) {
-               mTimeDiscontinuityPending = true;
-               if( (mAudioDecoder != NULL) &&
-                   (mFlushingAudio == NONE || mFlushingAudio == AWAITING_DISCONTINUITY) ) {
-                  flushDecoder( true, true );
-               }
-               if( (mVideoDecoder != NULL) &&
-                   (mFlushingVideo == NONE || mFlushingVideo == AWAITING_DISCONTINUITY) ) {
-                  flushDecoder( false, true );
-               }
-               if( mAudioDecoder == NULL ) {
-                   DP_MSG_LOW("Audio is not there, set it to shutdown");
-                   mFlushingAudio = SHUT_DOWN;
+            else if (nRet != PERMISSION_DENIED) {
+                mTimeDiscontinuityPending = true;
+            }
 
-               }
-               if( mVideoDecoder == NULL ) {
-                   DP_MSG_LOW("Video is not there, set it to shutdown");
-                   mFlushingVideo = SHUT_DOWN;
-               }
-            }
+            // get the new seeked position
+            newSeekTime = seekTimeUs;
+            DP_MSG_LOW("newSeekTime %lld", newSeekTime);
+            mTimedTextCEASamplesDisc = true;
 
             if(mStats != NULL) {
                 mStats->logSeek(seekTimeUs);
@@ -985,24 +867,16 @@ void DashPlayer::onMessageReceived(const sp<AMessage> &msg) {
 
         case kWhatPause:
         {
+            DP_MSG_ERROR("kWhatPause");
             CHECK(mRenderer != NULL);
             mRenderer->pause();
 
             mPauseIndication = true;
 
-#ifdef QCOM_WFD_SINK
-            if (mSourceType == kWfdSource) {
-                CHECK(mSource != NULL);
-                mSource->pause();
-            }
-#endif //QCOM_WFD_SINK
-
-            if (mSourceType == kHttpDashSource) {
-                Mutex::Autolock autoLock(mLock);
-                if (mSource != NULL)
-                {
-                  status_t nRet = mSource->pause();
-                }
+            Mutex::Autolock autoLock(mLock);
+            if (mSource != NULL)
+            {
+              status_t nRet = mSource->pause();
             }
 
             break;
@@ -1010,98 +884,80 @@ void DashPlayer::onMessageReceived(const sp<AMessage> &msg) {
 
         case kWhatResume:
         {
-            if (mSourceType == kHttpDashSource) {
-              bool disc = mSource->isPlaybackDiscontinued();
-              status_t status = OK;
+            DP_MSG_ERROR("kWhatResume");
+            bool disc = mSource->isPlaybackDiscontinued();
+            status_t status = OK;
 
-              if (disc == true)
+            if (disc == true)
+            {
+              uint64_t nMin = 0, nMax = 0, nMaxDepth = 0;
+              status = mSource->getRepositionRange(&nMin, &nMax, &nMaxDepth);
+              if (status == OK)
               {
-                uint64_t nMin = 0, nMax = 0, nMaxDepth = 0;
-                status = mSource->getRepositionRange(&nMin, &nMax, &nMaxDepth);
+                int64_t seekTimeUs = (int64_t)nMin * 1000ll;
+                DP_MSG_ERROR("kWhatSeek seekTimeUs=%lld us (%.2f secs)", seekTimeUs, seekTimeUs / 1E6);
+                status = mSource->seekTo(seekTimeUs);
                 if (status == OK)
                 {
-                  int64_t seekTimeUs = (int64_t)nMin * 1000ll;
+                  // if seek success then flush the audio,video decoder and renderer
+                  mTimeDiscontinuityPending = true;
+                  bool audPresence = false;
+                  bool vidPresence = false;
+                  bool textPresence = false;
+                  (void)mSource->getMediaPresence(audPresence,vidPresence,textPresence);
+                  mRenderer->setMediaPresence(true,audPresence); // audio
+                  mRenderer->setMediaPresence(false,vidPresence); // video
+                  if( (mVideoDecoder != NULL) &&
+                    (mFlushingVideo == NONE || mFlushingVideo == AWAITING_DISCONTINUITY) ) {
+                      flushDecoder( false, true ); // flush video, shutdown
+                  }
 
-                  DP_MSG_ERROR("kWhatSeek seekTimeUs=%lld us (%.2f secs)", seekTimeUs, seekTimeUs / 1E6);
-
-                  status = mSource->seekTo(seekTimeUs);
-                  if (status == OK)
+                  if( (mAudioDecoder != NULL) &&
+                    (mFlushingAudio == NONE|| mFlushingAudio == AWAITING_DISCONTINUITY) )
                   {
-                    // if seek success then flush the audio,video decoder and renderer
-                    mTimeDiscontinuityPending = true;
-                    bool audPresence = false;
-                    bool vidPresence = false;
-                    bool textPresence = false;
-                    (void)mSource->getMediaPresence(audPresence,vidPresence,textPresence);
-                    mRenderer->setMediaPresence(true,audPresence); // audio
-                    mRenderer->setMediaPresence(false,vidPresence); // video
-                    if( (mVideoDecoder != NULL) &&
-                      (mFlushingVideo == NONE || mFlushingVideo == AWAITING_DISCONTINUITY) ) {
-                        flushDecoder( false, true ); // flush video, shutdown
-                    }
+                    flushDecoder( true, true );  // flush audio,  shutdown
+                  }
+                  if( mAudioDecoder == NULL ) {
+                    DP_MSG_MEDIUM("Audio is not there, set it to shutdown");
+                    mFlushingAudio = SHUT_DOWN;
+                  }
+                  if( mVideoDecoder == NULL ) {
+                    DP_MSG_MEDIUM("Video is not there, set it to shutdown");
+                    mFlushingVideo = SHUT_DOWN;
+                  }
 
-                    if( (mAudioDecoder != NULL) &&
-                      (mFlushingAudio == NONE|| mFlushingAudio == AWAITING_DISCONTINUITY) )
+                  if (mDriver != NULL)
+                  {
+                    sp<DashPlayerDriver> driver = mDriver.promote();
+                    if (driver != NULL)
                     {
-                      flushDecoder( true, true );  // flush audio,  shutdown
-                    }
-                    if( mAudioDecoder == NULL ) {
-                      DP_MSG_MEDIUM("Audio is not there, set it to shutdown");
-                      mFlushingAudio = SHUT_DOWN;
-                    }
-                    if( mVideoDecoder == NULL ) {
-                      DP_MSG_MEDIUM("Video is not there, set it to shutdown");
-                      mFlushingVideo = SHUT_DOWN;
-                    }
-
-                    if (mDriver != NULL)
-                    {
-                      sp<DashPlayerDriver> driver = mDriver.promote();
-                      if (driver != NULL)
-                      {
-                        if( seekTimeUs >= 0 ) {
-                          mRenderer->notifySeekPosition(seekTimeUs);
-                          driver->notifyPosition( seekTimeUs );
-                        }
+                      if( seekTimeUs >= 0 ) {
+                        mRenderer->notifySeekPosition(seekTimeUs);
+                        driver->notifyPosition( seekTimeUs );
                       }
                     }
-
-                    mTimedTextCEASamplesDisc = true;
                   }
+
+                  mTimedTextCEASamplesDisc = true;
                 }
               }
+            }
 
-              if (status != OK)
-              {
-                //Notify error?
-                DP_MSG_ERROR(" Dash Source playback discontinuity check failure");
-                notifyListener(MEDIA_ERROR, MEDIA_ERROR_UNKNOWN, status);
-              }
+            if (status != OK)
+            {
+              //Notify error?
+              DP_MSG_ERROR(" Dash Source playback discontinuity check failure");
+              notifyListener(MEDIA_ERROR, MEDIA_ERROR_UNKNOWN, status);
+            }
 
-               Mutex::Autolock autoLock(mLock);
-               if (mSource != NULL) {
-                status_t nRet = mSource->resume();
-               }
-                if (mAudioDecoder == NULL || mVideoDecoder == NULL || mTextDecoder == NULL) {
-                    mScanSourcesPending = false;
-                    postScanSources();
-                }
-            }else if (mSourceType == kWfdSource) {
-                CHECK(mSource != NULL);
-                mSource->resume();
-                int count = 0;
-                //check if there are messages stored in the list, then repost them
-                while(!mDecoderMessageQueue.empty()) {
-                    (*mDecoderMessageQueue.begin()).mMessageToBeConsumed->post(); //self post
-                    mDecoderMessageQueue.erase(mDecoderMessageQueue.begin());
-                    ++count;
-                }
-                DP_MSG_ERROR("(%d) stored messages reposted ....",count);
-            }else {
-                if (mAudioDecoder == NULL || mVideoDecoder == NULL) {
-                    mScanSourcesPending = false;
-                    postScanSources();
-                }
+            Mutex::Autolock autoLock(mLock);
+            if (mSource != NULL) {
+              status_t nRet = mSource->resume();
+            }
+
+            if (mAudioDecoder == NULL || mVideoDecoder == NULL || mTextDecoder == NULL) {
+                mScanSourcesPending = false;
+                postScanSources();
             }
 
             CHECK(mRenderer != NULL);
@@ -1352,7 +1208,7 @@ void DashPlayer::finishFlushIfPossible() {
     mFlushingVideo = NONE;
 
     if (mResetInProgress) {
-        DP_MSG_HIGH("reset completed");
+        DP_MSG_ERROR("reset completed");
 
         mResetInProgress = false;
         finishReset();
@@ -1365,8 +1221,7 @@ void DashPlayer::finishFlushIfPossible() {
         DP_MSG_ERROR("DashPlayer::finishFlushIfPossible() setsurfacetexturepending=true");
     } else if (mAudioDecoder == NULL || mVideoDecoder == NULL) {
         DP_MSG_LOW("Start scanning for sources after shutdown");
-        if ( (mSourceType == kHttpDashSource) &&
-             (mTextDecoder != NULL) )
+        if (mTextDecoder != NULL)
         {
           if (mSource != NULL) {
            DP_MSG_LOW("finishFlushIfPossible calling mSource->stop");
@@ -1398,12 +1253,12 @@ void DashPlayer::finishReset() {
     }
 
     if (mSource != NULL) {
-        DP_MSG_HIGH("finishReset calling mSource->stop");
+        DP_MSG_ERROR("finishReset calling mSource->stop");
         mSource->stop();
         mSource.clear();
     }
 
-    if ( (mSourceType == kHttpDashSource) && (mTextDecoder != NULL) && (mTextNotify != NULL))
+    if ( (mTextDecoder != NULL) && (mTextNotify != NULL))
     {
       sp<AMessage> codecRequest;
       mTextNotify->findMessage("codec-request", &codecRequest);
@@ -1468,21 +1323,6 @@ status_t DashPlayer::instantiateDecoder(int track, sp<Decoder> *decoder) {
             mStats->setMime(mime);
         }
 
-        //TO-DO:: Similarly set here for Decode order
-#ifdef ANDROID_JB_MR2
-        if (mVideoIsAVC &&
-           ((mSourceType == kHttpLiveSource) || (mSourceType == kHttpDashSource) ||(mSourceType == kWfdSource))) {
-            DP_MSG_HIGH("Set Enable smooth streaming in meta data ");
-            meta->setInt32(kKeySmoothStreaming, 1);
-        }
-#endif
-
-        int32_t isDRMSecBuf = 0;
-        meta->findInt32(kKeyRequiresSecureBuffers, &isDRMSecBuf);
-        if(isDRMSecBuf) {
-            mIsSecureInputBuffers = true;
-        }
-
         if (mSetVideoSize) {
             int32_t width = 0;
             meta->findInt32(kKeyWidth, &width);
@@ -1518,7 +1358,7 @@ status_t DashPlayer::instantiateDecoder(int track, sp<Decoder> *decoder) {
         codecRequest->setInt32("what", DashCodec::kWhatFillThisBuffer);
         mTextNotify->setMessage("codec-request", codecRequest);
         DP_MSG_HIGH("Creating Dummy Text Decoder ");
-        if ((mSource != NULL) && (mSourceType == kHttpDashSource)) {
+        if (mSource != NULL) {
            mSource->setupSourceData(mTextNotify, track);
         }
     }
@@ -1526,15 +1366,12 @@ status_t DashPlayer::instantiateDecoder(int track, sp<Decoder> *decoder) {
     looper()->registerHandler(*decoder);
 
     char value[PROPERTY_VALUE_MAX] = {0};
-    if (mSourceType == kHttpLiveSource || mSourceType == kHttpDashSource){
-        //Set flushing state to none
-        Mutex::Autolock autoLock(mLock);
-        if(track == kAudio) {
-            mFlushingAudio = NONE;
-        } else if (track == kVideo) {
-            mFlushingVideo = NONE;
-
-        }
+    //Set flushing state to none
+    Mutex::Autolock autoLock(mLock);
+    if(track == kAudio) {
+        mFlushingAudio = NONE;
+    } else if (track == kVideo) {
+        mFlushingVideo = NONE;
     }
 
     if( track == kAudio || track == kVideo) {
@@ -1579,18 +1416,6 @@ status_t DashPlayer::feedDecoderInputData(int track, const sp<AMessage> &msg) {
     do {
 
         status_t err = (status_t)UNKNOWN_ERROR;
-
-        if (mIsSecureInputBuffers && track == kVideo) {
-            msg->findBuffer("buffer", &accessUnit);
-
-            if (accessUnit == NULL) {
-                DP_MSG_ERROR("Dashplayer NULL buffer in message");
-                return err;
-            } else {
-                DP_MSG_LOW("Dashplayer buffer in message %s %d",
-                accessUnit->data(), accessUnit->capacity());
-            }
-        }
 
         err = mSource->dequeueAccessUnit(track, &accessUnit);
 
@@ -1676,7 +1501,6 @@ status_t DashPlayer::feedDecoderInputData(int track, const sp<AMessage> &msg) {
 
         dropAccessUnit = false;
         if (track == kVideo) {
-            ++mNumFramesTotal;
 
             if(mStats != NULL) {
                 mStats->incrementTotalFrames();
@@ -1684,10 +1508,8 @@ status_t DashPlayer::feedDecoderInputData(int track, const sp<AMessage> &msg) {
 
             if (mVideoLateByUs > 100000ll
                     && mVideoIsAVC
-                    && !mIsSecureInputBuffers
                     && !IsAVCReferenceFrame(accessUnit)) {
                 dropAccessUnit = true;
-                ++mNumFramesDropped;
                 if(mStats != NULL) {
                     mStats->incrementDroppedFrames();
                 }
@@ -1697,17 +1519,10 @@ status_t DashPlayer::feedDecoderInputData(int track, const sp<AMessage> &msg) {
 
     // DP_MSG_LOW("returned a valid buffer of %s data", mTrackName);
 
-#if 0
-    int64_t mediaTimeUs;
-    CHECK(accessUnit->meta()->findInt64("timeUs", &mediaTimeUs));
-    DP_MSG_LOW("feeding %s input buffer at media time %.2f secs",
-         mTrackName,
-         mediaTimeUs / 1E6);
-#endif
     if (track == kVideo || track == kAudio) {
         reply->setBuffer("buffer", accessUnit);
         reply->post();
-    } else if (mSourceType == kHttpDashSource && track == kText) {
+    } else if (track == kText) {
         sendTextPacket(accessUnit,OK);
         if (mSource != NULL) {
           mSource->postNextTextSample(accessUnit,mTextNotify,track);
@@ -1991,11 +1806,10 @@ void DashPlayer::flushDecoder(bool audio, bool needShutdown) {
 
 sp<DashPlayer::Source>
     DashPlayer::LoadCreateSource(const char * uri, const KeyedVector<String8,String8> *headers,
-                               bool uidValid, uid_t uid, NuSourceType srcTyp)
+                               bool uidValid, uid_t uid)
 {
    const char* STREAMING_SOURCE_LIB = "libmmipstreamaal.so";
    const char* DASH_HTTP_LIVE_CREATE_SOURCE = "CreateDashHttpLiveSource";
-   const char* WFD_CREATE_SOURCE = "CreateWFDSource";
    void* pStreamingSourceLib = NULL;
 
    typedef DashPlayer::Source* (*SourceFactory)(const char * uri, const KeyedVector<String8, String8> *headers, bool uidValid, uid_t uid);
@@ -2010,23 +1824,14 @@ sp<DashPlayer::Source>
 
    SourceFactory StreamingSourcePtr = NULL;
 
-   if(srcTyp == kHttpDashSource) {
-
-       /* Get the entry level symbol which gets us the pointer to DASH HTTP Live Source object */
-       StreamingSourcePtr = (SourceFactory) dlsym(pStreamingSourceLib, DASH_HTTP_LIVE_CREATE_SOURCE);
-   } else if (srcTyp == kWfdSource){
-
-       /* Get the entry level symbol which gets us the pointer to WFD Source object */
-       StreamingSourcePtr = (SourceFactory) dlsym(pStreamingSourceLib, WFD_CREATE_SOURCE);
-
-   }
+   StreamingSourcePtr = (SourceFactory) dlsym(pStreamingSourceLib, DASH_HTTP_LIVE_CREATE_SOURCE);
 
    if (StreamingSourcePtr == NULL) {
        DP_MSG_ERROR("@@@@:: CreateDashHttpLiveSource symbol not found in libmmipstreamaal.so, return NULL ");
        return NULL;
    }
 
-    /*Get the Streaming (DASH\WFD) Source object, which will be used to communicate with Source (DASH\WFD) */
+    /*Get the Streaming (DASH) Source object, which will be used to communicate with Source (DASH) */
     sp<DashPlayer::Source> StreamingSource = StreamingSourcePtr(uri, headers, uidValid, uid);
 
     if(StreamingSource==NULL) {
@@ -2034,22 +1839,20 @@ sp<DashPlayer::Source>
         return NULL;
     }
 
-
     return StreamingSource;
 }
 
 status_t DashPlayer::prepareAsync() // only for DASH
 {
-    if (mSourceType == kHttpDashSource) {
-        sp<AMessage> msg = new AMessage(kWhatPrepareAsync, id());
-        if (msg == NULL)
-        {
-            DP_MSG_ERROR("Out of memory, AMessage is null for kWhatPrepareAsync\n");
-            return NO_MEMORY;
-        }
-        msg->post();
-        return -EWOULDBLOCK;
+    sp<AMessage> msg = new AMessage(kWhatPrepareAsync, id());
+    if (msg == NULL)
+    {
+        DP_MSG_ERROR("Out of memory, AMessage is null for kWhatPrepareAsync\n");
+        return NO_MEMORY;
     }
+    msg->post();
+    return -EWOULDBLOCK;
+
     return OK;
 }
 
@@ -2344,15 +2147,12 @@ void DashPlayer::getTrackName(int track, char* name)
 
 void DashPlayer::prepareSource()
 {
-    if (mSourceType == kHttpDashSource)
+    mSourceNotify = new AMessage(kWhatSourceNotify ,id());
+    mQOENotify = new AMessage(kWhatQOE,id());
+    if (mSource != NULL)
     {
-       mSourceNotify = new AMessage(kWhatSourceNotify ,id());
-       mQOENotify = new AMessage(kWhatQOE,id());
-       if (mSource != NULL)
-       {
-         mSource->setupSourceData(mSourceNotify,kTrackAll);
-         mSource->setupSourceData(mQOENotify,-1);
-       }
+      mSource->setupSourceData(mSourceNotify,kTrackAll);
+      mSource->setupSourceData(mQOENotify,-1);
     }
 }
 
@@ -2407,7 +2207,7 @@ void DashPlayer::processDeferredActions() {
 }
 
 void DashPlayer::performSetSurface(const sp<NativeWindowWrapper> &wrapper) {
-    ALOGV("performSetSurface");
+    DP_MSG_HIGH("performSetSurface");
 
     mNativeWindow = wrapper;
 
