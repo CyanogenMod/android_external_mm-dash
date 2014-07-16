@@ -27,10 +27,6 @@ LOCAL_SHARED_LIBRARIES :=       \
     libutils                    \
     libui                       \
 
-LOCAL_STATIC_LIBRARIES :=       \
-    libstagefright_nuplayer     \
-    libstagefright_rtsp         \
-
 LOCAL_C_INCLUDES := \
         $(TOP)/frameworks/av/media/libstagefright/timedtext           \
 	$(TOP)/frameworks/native/include/media/hardware               \

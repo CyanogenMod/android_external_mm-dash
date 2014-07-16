@@ -82,7 +82,7 @@ struct CodecObserver : public BnOMXObserver {
         sp<AMessage> msg = mNotify->dup();
 
         msg->setInt32("type", omx_msg.type);
-        msg->setPointer("node", omx_msg.node);
+        msg->setInt32("node", omx_msg.node);
 
         switch (omx_msg.type) {
             case omx_message::EVENT:
@@ -95,13 +95,13 @@ struct CodecObserver : public BnOMXObserver {
 
             case omx_message::EMPTY_BUFFER_DONE:
             {
-                msg->setPointer("buffer", omx_msg.u.buffer_data.buffer);
+                msg->setInt32("buffer", omx_msg.u.buffer_data.buffer);
                 break;
             }
 
             case omx_message::FILL_BUFFER_DONE:
             {
-                msg->setPointer(
+                msg->setInt32(
                         "buffer", omx_msg.u.extended_buffer_data.buffer);
                 msg->setInt32(
                         "range_offset",
@@ -115,12 +115,12 @@ struct CodecObserver : public BnOMXObserver {
                 msg->setInt64(
                         "timestamp",
                         omx_msg.u.extended_buffer_data.timestamp);
-                msg->setPointer(
-                        "platform_private",
-                        omx_msg.u.extended_buffer_data.platform_private);
-                msg->setPointer(
-                        "data_ptr",
-                        omx_msg.u.extended_buffer_data.data_ptr);
+                //msg->setPointer(
+                //        "platform_private",
+                //        omx_msg.u.extended_buffer_data.platform_private);
+                //msg->setPointer(
+                //        "data_ptr",
+                //        omx_msg.u.extended_buffer_data.data_ptr);
                 break;
             }
 
@@ -381,7 +381,7 @@ private:
 
 DashCodec::DashCodec()
     : mQuirks(0),
-      mNode(NULL),
+      mNode(0),
       mSentFormat(false),
       mPostFormat(false),
       mShutdownInProgress(false),
@@ -549,14 +549,23 @@ OMX_U32 *bufferCount, OMX_U32 *bufferSize,
         return err;
     }
 
-    err = native_window_set_buffers_geometry(
+    err = native_window_set_buffers_dimensions(
             mNativeWindow.get(),
             def.format.video.nFrameWidth,
-            def.format.video.nFrameHeight,
+            def.format.video.nFrameHeight);
+
+    if (err != 0) {
+        DC_MSG_ERROR("native_window_set_buffers_dimensions failed: %s (%d)",
+                strerror(-err), -err);
+        return err;
+    }
+
+    err = native_window_set_buffers_format(
+            mNativeWindow.get(),
             def.format.video.eColorFormat);
 
     if (err != 0) {
-        DC_MSG_ERROR("native_window_set_buffers_geometry failed: %s (%d)",
+        DC_MSG_ERROR("native_window_set_buffers_format failed: %s (%d)",
                 strerror(-err), -err);
         return err;
     }
@@ -1232,7 +1241,7 @@ status_t DashCodec::setMinBufferSize(OMX_U32 portIndex, size_t size) {
 
 status_t DashCodec::setupAACCodec(
         int32_t numChannels, int32_t sampleRate,
-        int32_t bitRate, int32_t aacProfile, bool isADTS) {
+        int32_t /*bitRate*/, int32_t /*aacProfile*/, bool isADTS) {
 
      status_t err = setupRawAudioFormat(
             kPortIndexOutput,
@@ -1345,7 +1354,7 @@ status_t DashCodec::setupG711Codec(int32_t numChannels) {
 }
 
 status_t DashCodec::setupFlacCodec(
-        int32_t numChannels, int32_t sampleRate, int32_t compressionLevel) {
+        int32_t numChannels, int32_t sampleRate, int32_t /*compressionLevel*/) {
 
     return setupRawAudioFormat(
             kPortIndexOutput,
@@ -1731,7 +1740,7 @@ void DashCodec::sendFormatChange() {
         {
             OMX_VIDEO_PORTDEFINITIONTYPE *videoDef = &def->format.video;
 
-            notify->setString("mime", MEDIA_MIMETYPE_VIDEO_RAW);
+            //notify->setString("mime", MEDIA_MIMETYPE_VIDEO_RAW);
             notify->setInt32("width", videoDef->nFrameWidth);
             notify->setInt32("height", videoDef->nFrameHeight);
             notify->setInt32("stride", videoDef->nStride);
@@ -1818,7 +1827,7 @@ void DashCodec::sendFormatChange() {
             CHECK_EQ((int)params.eNumData, (int)OMX_NumericalDataSigned);
             CHECK_EQ((int)params.ePCMMode, (int)OMX_AUDIO_PCMModeLinear);
 
-            notify->setString("mime", MEDIA_MIMETYPE_AUDIO_RAW);
+            //notify->setString("mime", MEDIA_MIMETYPE_AUDIO_RAW);
             notify->setInt32("channel-count", params.nChannels);
             notify->setInt32("sample-rate", params.nSamplingRate);
 
@@ -1871,10 +1880,18 @@ status_t DashCodec::PushBlankBuffersToNativeWindow(sp<ANativeWindow> nativeWindo
         return err;
     }
 
-    err = native_window_set_buffers_geometry(nativeWindow.get(), 1, 1,
+    err = native_window_set_buffers_dimensions(nativeWindow.get(),
+            1, 1);
+    if (err != 0) {
+        DC_MSG_ERROR("error pushing blank frames: set_buffers_dimensions failed: %s (%d)",
+                strerror(-err), -err);
+        goto error;
+    }
+
+    err = native_window_set_buffers_format(nativeWindow.get(),
             HAL_PIXEL_FORMAT_RGBX_8888);
-    if (err != NO_ERROR) {
-        DC_MSG_ERROR("error pushing blank frames: set_buffers_geometry failed: %s (%d)",
+    if (err != 0) {
+        DC_MSG_ERROR("error pushing blank frames: set_buffers_format failed: %s (%d)",
                 strerror(-err), -err);
         goto error;
     }
@@ -2063,8 +2080,8 @@ bool DashCodec::BaseState::onOMXMessage(const sp<AMessage> &msg) {
     int32_t type;
     CHECK(msg->findInt32("type", &type));
 
-    IOMX::node_id nodeID;
-    CHECK(msg->findPointer("node", &nodeID));
+    IOMX::node_id nodeID = 0;
+    CHECK(msg->findInt32("node", (int32_t*)&nodeID));
     CHECK_EQ(nodeID, mCodec->mNode);
 
     switch (type) {
@@ -2095,7 +2112,7 @@ bool DashCodec::BaseState::onOMXMessage(const sp<AMessage> &msg) {
         case omx_message::EMPTY_BUFFER_DONE:
         {
             IOMX::buffer_id bufferID;
-            CHECK(msg->findPointer("buffer", &bufferID));
+            CHECK(msg->findInt32("buffer", (int32_t*)&bufferID));
 
             return onOMXEmptyBufferDone(bufferID);
         }
@@ -2103,19 +2120,19 @@ bool DashCodec::BaseState::onOMXMessage(const sp<AMessage> &msg) {
         case omx_message::FILL_BUFFER_DONE:
         {
             IOMX::buffer_id bufferID;
-            CHECK(msg->findPointer("buffer", &bufferID));
+            CHECK(msg->findInt32("buffer", (int32_t*)&bufferID));
 
             int32_t rangeOffset, rangeLength, flags;
             int64_t timeUs;
-            void *platformPrivate;
-            void *dataPtr;
+            void *platformPrivate = NULL;
+            void *dataPtr = NULL;
 
             CHECK(msg->findInt32("range_offset", &rangeOffset));
             CHECK(msg->findInt32("range_length", &rangeLength));
             CHECK(msg->findInt32("flags", &flags));
             CHECK(msg->findInt64("timestamp", &timeUs));
-            CHECK(msg->findPointer("platform_private", &platformPrivate));
-            CHECK(msg->findPointer("data_ptr", &dataPtr));
+            //CHECK(msg->findPointer("platform_private", (void **)&platformPrivate));
+            //CHECK(msg->findPointer("data_ptr", (void **)&dataPtr));
 
             return onOMXFillBufferDone(
                     bufferID,
@@ -2206,13 +2223,13 @@ void DashCodec::BaseState::postFillThisBuffer(BufferInfo *info) {
 
     sp<AMessage> notify = mCodec->mNotify->dup();
     notify->setInt32("what", DashCodec::kWhatFillThisBuffer);
-    notify->setPointer("buffer-id", info->mBufferID);
+    notify->setInt32("buffer-id", info->mBufferID);
 
     info->mData->meta()->clear();
     notify->setBuffer("buffer", info->mData);
 
     sp<AMessage> reply = new AMessage(kWhatInputBufferFilled, mCodec->id());
-    reply->setPointer("buffer-id", info->mBufferID);
+    reply->setInt32("buffer-id", info->mBufferID);
 
     notify->setMessage("reply", reply);
 
@@ -2223,7 +2240,7 @@ void DashCodec::BaseState::postFillThisBuffer(BufferInfo *info) {
 
 void DashCodec::BaseState::onInputBufferFilled(const sp<AMessage> &msg) {
     IOMX::buffer_id bufferID;
-    CHECK(msg->findPointer("buffer-id", &bufferID));
+    CHECK(msg->findInt32("buffer-id",  (int32_t*)&bufferID));
 
     sp<ABuffer> buffer;
     int32_t err = OK;
@@ -2502,7 +2519,7 @@ bool DashCodec::BaseState::onOMXFillBufferDone(
 
             sp<AMessage> notify = mCodec->mNotify->dup();
             notify->setInt32("what", DashCodec::kWhatDrainThisBuffer);
-            notify->setPointer("buffer-id", info->mBufferID);
+            notify->setInt32("buffer-id", info->mBufferID);
             notify->setBuffer("buffer", info->mData);
             notify->setInt32("flags", flags);
 
@@ -2512,7 +2529,7 @@ bool DashCodec::BaseState::onOMXFillBufferDone(
                 int64_t nAllocLen = 0;
                 int64_t nStartOffset = 0;
 
-                OMX_BUFFERHEADERTYPE *pBufHdr = (OMX_BUFFERHEADERTYPE *)bufferID;
+                OMX_BUFFERHEADERTYPE *pBufHdr = (OMX_BUFFERHEADERTYPE *)(unsigned long)bufferID;
 
                 nStartOffset = pBufHdr->nOffset;
 
@@ -2559,7 +2576,7 @@ bool DashCodec::BaseState::onOMXFillBufferDone(
                    mCodec->mPostFormat = true;
             }
 
-            reply->setPointer("buffer-id", info->mBufferID);
+            reply->setInt32("buffer-id", info->mBufferID);
 
             notify->setMessage("reply", reply);
 
@@ -2585,7 +2602,7 @@ bool DashCodec::BaseState::onOMXFillBufferDone(
 
 void DashCodec::BaseState::onOutputBufferDrained(const sp<AMessage> &msg) {
     IOMX::buffer_id bufferID;
-    CHECK(msg->findPointer("buffer-id", &bufferID));
+    CHECK(msg->findInt32("buffer-id", (int32_t*)&bufferID));
 
     ssize_t index;
     BufferInfo *info =
@@ -2729,7 +2746,7 @@ void DashCodec::UninitializedState::onSetup(
 bool DashCodec::UninitializedState::onAllocateComponent(const sp<AMessage> &msg) {
     DC_MSG_LOW("onAllocateComponent");
 
-    CHECK(mCodec->mNode == NULL);
+    CHECK(mCodec->mNode == 0);
 
     OMXClient client;
     CHECK_EQ(client.connect(), (status_t)OK);
@@ -2763,7 +2780,7 @@ bool DashCodec::UninitializedState::onAllocateComponent(const sp<AMessage> &msg)
     }
 
     sp<CodecObserver> observer = new CodecObserver;
-    IOMX::node_id node = NULL;
+    IOMX::node_id node = 0;
 
     for (size_t matchIndex = 0; matchIndex < matchingCodecs.size();
             ++matchIndex) {
@@ -2780,10 +2797,10 @@ bool DashCodec::UninitializedState::onAllocateComponent(const sp<AMessage> &msg)
             break;
         }
 
-        node = NULL;
+        node = 0;
     }
 
-    if (node == NULL) {
+    if (node == 0) {
         if (!mime.empty()) {
             DC_MSG_ERROR("Unable to instantiate a decoder for type '%s'.",
                  mime.c_str());
@@ -2847,7 +2864,7 @@ void DashCodec::LoadedState::onShutdown(bool keepComponentAllocated) {
         CHECK_EQ(mCodec->mOMX->freeNode(mCodec->mNode), (status_t)OK);
 
         mCodec->mNativeWindow.clear();
-        mCodec->mNode = NULL;
+        mCodec->mNode = 0;
         mCodec->mOMX.clear();
         mCodec->mQuirks = 0;
         mCodec->mFlags = 0;
@@ -2902,7 +2919,7 @@ bool DashCodec::LoadedState::onConfigureComponent(
         const sp<AMessage> &msg) {
     DC_MSG_LOW("onConfigureComponent");
 
-    CHECK(mCodec->mNode != NULL);
+    CHECK(mCodec->mNode != 0);
 
     int32_t value;
 
@@ -3615,7 +3632,7 @@ bool DashCodec::FlushingState::onOMXEvent(
         {
             sp<AMessage> msg = new AMessage(kWhatOMXMessage, mCodec->id());
             msg->setInt32("type", omx_message::EVENT);
-            msg->setPointer("node", mCodec->mNode);
+            msg->setInt32("node", mCodec->mNode);
             msg->setInt32("event", event);
             msg->setInt32("data1", data1);
             msg->setInt32("data2", data2);
@@ -3740,7 +3757,7 @@ bool DashCodec::FlushingOutputState::onOMXEvent(
         {
             sp<AMessage> msg = new AMessage(kWhatOMXMessage, mCodec->id());
             msg->setInt32("type", omx_message::EVENT);
-            msg->setPointer("node", mCodec->mNode);
+            msg->setInt32("node", mCodec->mNode);
             msg->setInt32("event", event);
             msg->setInt32("data1", data1);
             msg->setInt32("data2", data2);

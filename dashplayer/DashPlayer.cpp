@@ -1613,7 +1613,7 @@ void DashPlayer::renderBuffer(bool audio, const sp<AMessage> &msg) {
           else
           {
             OMX_OTHER_EXTRADATATYPE *pExtra;
-            pExtra = (OMX_OTHER_EXTRADATATYPE *)((unsigned)((OMX_U8*)buffVaddr + nOffset + nFilledLen + 3)&(~3));
+            pExtra = (OMX_OTHER_EXTRADATATYPE *)((unsigned long)((OMX_U8*)buffVaddr + nOffset + nFilledLen + 3)&(~3));
 
             while (pExtra &&
               ((OMX_U8*)pExtra + pExtra->nSize) <= ((OMX_U8*)buffVaddr + nAllocLen) &&
