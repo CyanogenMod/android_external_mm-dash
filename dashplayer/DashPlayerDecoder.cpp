@@ -365,6 +365,13 @@ bool DashPlayer::Decoder::handleAnOutputBuffer() {
     CHECK_LT(bufferIx, mOutputBuffers.size());
     sp<ABuffer> buffer = mOutputBuffers[bufferIx];
     buffer->setRange(offset, size);
+
+    sp<RefBase> obj;
+    sp<GraphicBuffer> graphicBuffer;
+    if (buffer->meta()->findObject("graphic-buffer", &obj)) {
+        graphicBuffer = static_cast<GraphicBuffer*>(obj.get());
+    }
+
     buffer->meta()->clear();
     buffer->meta()->setInt64("timeUs", timeUs);
     if (flags & MediaCodec::BUFFER_FLAG_EOS) {
@@ -378,6 +385,10 @@ bool DashPlayer::Decoder::handleAnOutputBuffer() {
 
     sp<AMessage> notify = mNotify->dup();
     notify->setInt32("what", kWhatDrainThisBuffer);
+    if(flags & MediaCodec::BUFFER_FLAG_EXTRADATA) {
+       buffer->meta()->setInt32("extradata", 1);
+    }
+    buffer->meta()->setObject("graphic-buffer", graphicBuffer);
     notify->setBuffer("buffer", buffer);
     notify->setMessage("reply", reply);
     notify->post();
@@ -624,6 +635,7 @@ sp<AMessage> DashPlayer::Decoder::makeFormat(const sp<MetaData> &meta) {
     if(!strncasecmp(mime, "video/", strlen("video/"))){
        msg->setInt32("max-height", MAX_HEIGHT);
        msg->setInt32("max-width", MAX_WIDTH);
+       msg->setInt32("enable-extradata-user", 1);
 
        // Below property requie to set to prefer adaptive playback
        // msg->setInt32("prefer-adaptive-playback", 1);
