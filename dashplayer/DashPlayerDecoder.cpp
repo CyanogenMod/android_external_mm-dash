@@ -265,6 +265,8 @@ void android::DashPlayer::Decoder::onInputBufferFilled(const sp<AMessage> &msg) 
             flags |= MediaCodec::BUFFER_FLAG_EOS;
         }
 
+        DPD_MSG_MEDIUM("Input buffer:[%s]: %p", mComponentName.c_str(),  buffer->data());
+
         // copy into codec buffer
         if (buffer != codecBuffer) {
             CHECK_LE(buffer->size(), codecBuffer->capacity());
