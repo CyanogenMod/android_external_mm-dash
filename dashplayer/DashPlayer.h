@@ -292,6 +292,10 @@ private:
     //Tells if app registered for a QCTimedText Listener. If not registered do not send text samples above.
     bool mQCTimedTextListenerPresent;
 
+    int32_t mCurrentWidth;
+    int32_t mCurrentHeight;
+    int32_t mColorFormat;
+
     DISALLOW_EVIL_CONSTRUCTORS(DashPlayer);
 };
 

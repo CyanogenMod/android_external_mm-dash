@@ -39,6 +39,7 @@
 #include <gralloc_priv.h>
 #include <cutils/properties.h>
 #include <utils/Log.h>
+#include <media/msm_media_info.h>
 
 #define DP_MSG_ERROR(...) ALOGE(__VA_ARGS__)
 #define DP_MSG_HIGH(...) if(mLogLevel >= 1){ALOGE(__VA_ARGS__);}
@@ -134,7 +135,10 @@ DashPlayer::DashPlayer()
       mLogLevel(0),
       mTimedTextCEAPresent(false),
       mTimedTextCEASamplesDisc(false),
-      mQCTimedTextListenerPresent(false){
+      mQCTimedTextListenerPresent(false),
+      mCurrentWidth(0),
+      mCurrentHeight(0),
+      mColorFormat(0) {
       mTrackName = new char[6];
 
       char property_value[PROPERTY_VALUE_MAX] = {0};
@@ -635,6 +639,13 @@ void DashPlayer::onMessageReceived(const sp<AMessage> &msg) {
                 } else if (track == kVideo) {
                     // video
                     DP_MSG_ERROR("@@@@:: Dashplayer :: MESSAGE FROM CODEC +++++++++++++++++++++++++++++++ kWhatOutputFormatChanged:: video");
+
+                    sp<AMessage> format;
+                    CHECK(msg->findMessage("format", &format));
+                    CHECK(format->findInt32("width", &mCurrentWidth));
+                    CHECK(format->findInt32("height", &mCurrentHeight));
+                    CHECK(format->findInt32("color-format", &mColorFormat));
+                    DP_MSG_ERROR("@@@@:: Dashplayer :: MESSAGE FROM CODEC +++++++++++++++++++++++++++++++ kWhatOutputFormatChanged:: video new height:%d width%d", mCurrentWidth, mCurrentHeight);
                 }
             } else if (what == Decoder::kWhatShutdownCompleted) {
                 DP_MSG_ERROR("%s shutdown completed", mTrackName);
@@ -1588,174 +1599,183 @@ void DashPlayer::renderBuffer(bool audio, const sp<AMessage> &msg) {
         skipUntilMediaTimeUs = -1;
     }
 
-    if(mRenderer != NULL) {
-#if 0
+    if(mRenderer != NULL)
+    {
       if(!audio)
       {
-        int32_t nFlags;
+        int32_t extradata = 0;
 
-        CHECK(msg->findInt32("flags", &nFlags));
-
-        if (nFlags & OMX_BUFFERFLAG_EXTRADATA)
+        if (buffer->meta()->findInt32("extradata", &extradata) && 1 == extradata)
         {
           DP_MSG_HIGH("kwhatdrainthisbuffer: Decoded sample contains SEI. Parse for CEA encoded cc extradata");
 
-          OMX_U8* bufferHandle = NULL;
-          int64_t nFilledLen = 0;
-          int64_t nAllocLen = 0;
-          int64_t nOffset = 0;
+          sp<RefBase> obj;
 
-          CHECK(msg->findPointer("gralloc-handle", (void**) &bufferHandle));
-          CHECK(msg->findInt64("filled-length", &nFilledLen));
-          CHECK(msg->findInt64("alloc-length", &nAllocLen));
-          CHECK(msg->findInt64("start-offset", &nOffset));
-
-          private_handle_t *privHandle = (private_handle_t *) bufferHandle;
-
-          DP_MSG_LOW("Decoded fbd bufferHandle fd %d, size %d\n", privHandle->fd, privHandle->size);
-
-          OMX_U8* buffVaddr = (OMX_U8*)mmap(NULL, privHandle->size,
-            PROT_READ|PROT_WRITE, MAP_SHARED, privHandle->fd, 0);
-
-          DP_MSG_LOW("Decoded yuv stream buffVaddr %p\n", buffVaddr);
-
-          if (buffVaddr == MAP_FAILED)
+          if (buffer->meta()->findObject("graphic-buffer", &obj))
           {
-            DP_MSG_ERROR("errno is %d", errno);
-          }
-          else
-          {
-            OMX_OTHER_EXTRADATATYPE *pExtra;
-            pExtra = (OMX_OTHER_EXTRADATATYPE *)((unsigned long)((OMX_U8*)buffVaddr + nOffset + nFilledLen + 3)&(~3));
-
-            while (pExtra &&
-              ((OMX_U8*)pExtra + pExtra->nSize) <= ((OMX_U8*)buffVaddr + nAllocLen) &&
-              pExtra->eType != OMX_ExtraDataNone )
+            sp<GraphicBuffer> graphicBuffer = static_cast<GraphicBuffer*>(obj.get());
+            if (graphicBuffer != NULL)
             {
-              DP_MSG_LOW(
-                "============== Extra Data ==============\n"
-                "           Size: %lu\n"
-                "        Version: %lu\n"
-                "      PortIndex: %lu\n"
-                "           Type: %x\n"
-                "       DataSize: %lu",
-                pExtra->nSize, pExtra->nVersion.nVersion,
-                pExtra->nPortIndex, pExtra->eType, pExtra->nDataSize);
+              DP_MSG_LOW("kwhatdrainthisbuffer: Extradata present",
+                  "graphicBuffer = %p, width=%d height=%d color-format=%d",
+                  graphicBuffer.get(), mCurrentWidth, mCurrentHeight, mColorFormat);
 
-              if(pExtra->eType == (OMX_EXTRADATATYPE) OMX_ExtraDataMP2UserData)
+              if (mColorFormat == 0x7FA30C04 /*OMX_QCOM_COLOR_FormatYUV420PackedSemiPlanar32m*/)
               {
-                OMX_QCOM_EXTRADATA_USERDATA *userdata = (OMX_QCOM_EXTRADATA_USERDATA *)pExtra->data;
-                OMX_U8 *data_ptr = (OMX_U8 *)userdata->data;
-                OMX_U32 userdata_size = pExtra->nDataSize - sizeof(userdata->type);
+                size_t filledLen = (VENUS_Y_STRIDE(COLOR_FMT_NV12, mCurrentWidth)
+                                    * VENUS_Y_SCANLINES(COLOR_FMT_NV12, mCurrentHeight))
+                                          +  (VENUS_UV_STRIDE(COLOR_FMT_NV12, mCurrentWidth)
+                                              * VENUS_UV_SCANLINES(COLOR_FMT_NV12, mCurrentHeight));
+                size_t allocLen = VENUS_BUFFER_SIZE(COLOR_FMT_NV12, mCurrentWidth, mCurrentHeight);
+                size_t offset = buffer->offset();
 
-                DP_MSG_LOW(
-                  "--------------  OMX_ExtraDataMP2UserData Userdata  -------------\n"
-                  "    Stream userdata type: %lu\n"
-                  "          userdata size: %lu\n"
-                  "    STREAM_USERDATA:",
-                  userdata->type, userdata_size);
+                DP_MSG_LOW("kwhatdrainthisbuffer: decoded buffer ranges "
+                  "filledLen = %lu, allocLen = %lu, startOffset = %lu",
+                  filledLen, allocLen, offset);
 
-                for (uint32_t i = 0; i < userdata_size; i+=4) {
-                  DP_MSG_ERROR("        %x %x %x %x",
-                    data_ptr[i], data_ptr[i+1],
-                    data_ptr[i+2], data_ptr[i+3]);
-                }
+                // 'lock' returns mapped virtual address that can be read from or written into
+                //  Use GRALLOC_USAGE_SW_READ_MASK / WRITE_MASK to indicate access type
+                // 'unlock' will unmap the mapped address
 
-                DP_MSG_LOW(
-                  "-------------- End of OMX_ExtraDataMP2UserData Userdata -----------");
+                void *yuvData = NULL;
+                graphicBuffer->lock(GRALLOC_USAGE_SW_READ_MASK, &yuvData);
 
-                /*
-                SEI Syntax
-
-                user_data_registered_itu_t_t35 ( ) {
-                itu_t_t35_country_code (8 bits)
-                itu_t_t35_provider_code (16 bits)
-                user_identifier (32 bits)
-                user_structure( )
-                }
-
-                cc_data parsing logic
-                1. itu_t_t35_country_code - A fixed 8-bit field, the value of which shall be 0xB5.3
-                   itu_t_35_provider_code - A fixed 16-bit field, the value of which shall be 0x0031.
-                2. user_identifier should match 0x47413934 ('GA94') ATSC_user_data( )
-
-                ATSC_user_data Syntax
-                ATSC_user_data() {
-                user_data_type_code (8 bits)
-                user_data_type_structure()
-                }
-
-                3. user_data_type_code should match 0x03 MPEG_cc_data()
-
-                */
-
-                if(0xB5 == data_ptr[0] && 0x00 == data_ptr[1] && 0x31 == data_ptr[2]
-                      && 0x47 == data_ptr[3] && 0x41 == data_ptr[4] && 0x39 == data_ptr[5] && 0x34 == data_ptr[6]
-                         && 0x03 == data_ptr[7])
+                if (yuvData)
                 {
-                  DP_MSG_HIGH("SEI payload user_data_type_code is CEA encoded MPEG_cc_data()");
+                  OMX_OTHER_EXTRADATATYPE *pExtra;
+                  pExtra = (OMX_OTHER_EXTRADATATYPE *)((unsigned long)((OMX_U8*)yuvData + offset + filledLen + 3)&(~3));
 
-                  OMX_U32 cc_data_size = 0;
-                  for(int i = 8; data_ptr[i] != 0xFF /*each cc_data ends with marker bits*/; i++)
-                  {
-                    cc_data_size++;
-                  }
-
-                  if(cc_data_size > 0)
+                  while (pExtra &&
+                    ((OMX_U8*)pExtra + pExtra->nSize) <= ((OMX_U8*)yuvData + allocLen) &&
+                    pExtra->eType != OMX_ExtraDataNone )
                   {
                     DP_MSG_LOW(
-                      "--------------  MPEG_cc_data()  -------------\n"
-                      "    cc_data ptr: %p cc_data_size: %lu\n",
-                      &data_ptr[8], cc_data_size);
+                      "============== Extra Data ==============\n"
+                      "           Size: %lu\n"
+                      "        Version: %lu\n"
+                      "      PortIndex: %lu\n"
+                      "           Type: %x\n"
+                      "       DataSize: %lu",
+                      pExtra->nSize, pExtra->nVersion.nVersion,
+                      pExtra->nPortIndex, pExtra->eType, pExtra->nDataSize);
 
-                    for (uint32_t i = 8; i < 8 + cc_data_size; i+=4) {
-                      DP_MSG_LOW("        %x %x %x %x",
-                        data_ptr[i], data_ptr[i+1],
-                        data_ptr[i+2], data_ptr[i+3]);
-                    }
-
-                    DP_MSG_LOW(
-                      "--------------  End of MPEG_cc_data()  -------------\n");
-
-                    sp<ABuffer> accessUnit = new ABuffer((OMX_U8*)&data_ptr[8], cc_data_size);
-
-                    int64_t mediaTimeUs;
-
-                    sp<ABuffer> buffer;
-                    CHECK(msg->findBuffer("buffer", &buffer));
-                    CHECK(buffer->meta()->findInt64("timeUs", &mediaTimeUs));
-                    accessUnit->meta()->setInt64("timeUs",mediaTimeUs);
-
-                    //To signal discontinuity in samples during seek and resume-out-of-tsb(internal seek) operations
-                    if(mTimedTextCEASamplesDisc)
+                    if(pExtra->eType == (OMX_EXTRADATATYPE) OMX_ExtraDataMP2UserData)
                     {
-                      accessUnit->meta()->setInt32("disc", 1);
-                      mTimedTextCEASamplesDisc = false;
+                      OMX_QCOM_EXTRADATA_USERDATA *userdata = (OMX_QCOM_EXTRADATA_USERDATA *)pExtra->data;
+                      OMX_U8 *data_ptr = (OMX_U8 *)userdata->data;
+                      OMX_U32 userdata_size = pExtra->nDataSize - sizeof(userdata->type);
+
+                      DP_MSG_LOW(
+                        "--------------  OMX_ExtraDataMP2UserData Userdata  -------------\n"
+                        "    Stream userdata type: %lu\n"
+                        "           userdata size: %lu\n"
+                        "         STREAM_USERDATA:",
+                        userdata->type, userdata_size);
+
+                      for (uint32_t i = 0; i < userdata_size; i+=4) {
+                        DP_MSG_LOW("        %x %x %x %x",
+                          data_ptr[i], data_ptr[i+1],
+                          data_ptr[i+2], data_ptr[i+3]);
+                      }
+
+                      DP_MSG_LOW(
+                        "-------------- End of OMX_ExtraDataMP2UserData Userdata -----------");
+
+                      /*
+                      SEI Syntax
+
+                      user_data_registered_itu_t_t35 ( ) {
+                      itu_t_t35_country_code (8 bits)
+                      itu_t_t35_provider_code (16 bits)
+                      user_identifier (32 bits)
+                      user_structure( )
+                      }
+
+                      cc_data parsing logic
+                      1. itu_t_t35_country_code - A fixed 8-bit field, the value of which shall be 0xB5.3
+                      itu_t_35_provider_code - A fixed 16-bit field, the value of which shall be 0x0031.
+                      2. user_identifier should match 0x47413934 ('GA94') ATSC_user_data( )
+
+                      ATSC_user_data Syntax
+                      ATSC_user_data() {
+                      user_data_type_code (8 bits)
+                      user_data_type_structure()
+                      }
+
+                      3. user_data_type_code should match 0x03 MPEG_cc_data()
+
+                      */
+
+                      if(0xB5 == data_ptr[0] && 0x00 == data_ptr[1] && 0x31 == data_ptr[2]
+                      && 0x47 == data_ptr[3] && 0x41 == data_ptr[4] && 0x39 == data_ptr[5] && 0x34 == data_ptr[6]
+                      && 0x03 == data_ptr[7])
+                      {
+                        DP_MSG_HIGH("SEI payload user_data_type_code is CEA encoded MPEG_cc_data()");
+
+                        OMX_U32 cc_data_size = 0;
+                        for(int i = 8; data_ptr[i] != 0xFF /*each cc_data ends with marker bits*/; i++)
+                        {
+                          cc_data_size++;
+                        }
+
+                        if(cc_data_size > 0)
+                        {
+                          DP_MSG_LOW(
+                            "--------------  MPEG_cc_data()  -------------\n"
+                            "    cc_data ptr: %p cc_data_size: %lu\n",
+                            &data_ptr[8], cc_data_size);
+
+                          for (uint32_t i = 8; i < 8 + cc_data_size; i+=4) {
+                            DP_MSG_LOW("        %x %x %x %x",
+                              data_ptr[i], data_ptr[i+1],
+                              data_ptr[i+2], data_ptr[i+3]);
+                          }
+
+                          DP_MSG_LOW(
+                            "--------------  End of MPEG_cc_data()  -------------\n");
+
+                          sp<ABuffer> accessUnit = new ABuffer((OMX_U8*)&data_ptr[8], cc_data_size);
+
+                          int64_t mediaTimeUs;
+
+                          sp<ABuffer> buffer;
+                          CHECK(msg->findBuffer("buffer", &buffer));
+                          CHECK(buffer->meta()->findInt64("timeUs", &mediaTimeUs));
+                          accessUnit->meta()->setInt64("timeUs",mediaTimeUs);
+
+                          //To signal discontinuity in samples during seek and resume-out-of-tsb(internal seek) operations
+                          if(mTimedTextCEASamplesDisc)
+                          {
+                            accessUnit->meta()->setInt32("disc", 1);
+                            mTimedTextCEASamplesDisc = false;
+                          }
+
+                          //Indicate timedtext CEA present in stream. Used to signal EOS in Codec::kWhatEOS
+                          if(!mTimedTextCEAPresent)
+                          {
+                            mTimedTextCEAPresent = true;
+                          }
+
+                          sendTextPacket(accessUnit, OK, TIMED_TEXT_CEA);
+
+                          accessUnit = NULL;
+                          break;
+                        }
+                      }
                     }
 
-                    //Indicate timedtext CEA present in stream. Used to signal EOS in Codec::kWhatEOS
-                    if(!mTimedTextCEAPresent)
-                    {
-                      mTimedTextCEAPresent = true;
-                    }
-
-                    sendTextPacket(accessUnit, OK, TIMED_TEXT_CEA);
-
-                    accessUnit = NULL;
-                    break;
+                    pExtra = (OMX_OTHER_EXTRADATATYPE *) (((OMX_U8 *) pExtra) + pExtra->nSize);
                   }
+
+                  graphicBuffer->unlock();
                 }
               }
-
-              pExtra = (OMX_OTHER_EXTRADATATYPE *) (((OMX_U8 *) pExtra) + pExtra->nSize);
             }
-
-            munmap (buffVaddr, privHandle->size);
           }
         }
       }
-#endif
-        mRenderer->queueBuffer(audio, buffer, reply);
+
+      mRenderer->queueBuffer(audio, buffer, reply);
     }
 }
 
