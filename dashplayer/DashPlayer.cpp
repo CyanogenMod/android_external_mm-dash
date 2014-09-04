@@ -827,7 +827,7 @@ void DashPlayer::onMessageReceived(const sp<AMessage> &msg) {
             CHECK(msg->findInt64("seekTimeUs", &seekTimeUs));
 
             DP_MSG_ERROR("kWhatSeek seekTimeUs=%lld us (%.2f secs)",
-                 seekTimeUs, seekTimeUs / 1E6);
+                 seekTimeUs, (double)seekTimeUs / 1E6);
 
             nRet = mSource->seekTo(seekTimeUs);
 
@@ -916,7 +916,7 @@ void DashPlayer::onMessageReceived(const sp<AMessage> &msg) {
               if (status == OK)
               {
                 int64_t seekTimeUs = (int64_t)nMin * 1000ll;
-                DP_MSG_ERROR("kWhatSeek seekTimeUs=%lld us (%.2f secs)", seekTimeUs, seekTimeUs / 1E6);
+                DP_MSG_ERROR("kWhatSeek seekTimeUs=%lld us (%.2f secs)", seekTimeUs, (double)seekTimeUs / 1E6);
                 status = mSource->seekTo(seekTimeUs);
                 if (status == OK)
                 {
@@ -1044,8 +1044,7 @@ void DashPlayer::onMessageReceived(const sp<AMessage> &msg) {
                 if (!msgFound){
                     DP_MSG_MEDIUM("kWhatSourceNotify source-request not found, trying using sourceRequestID");
                     char srName[] = "source-request00";
-                    srName[strlen("source-request")] += mSRid/10;
-                    srName[strlen("source-request")+sizeof(char)] += mSRid%10;
+                    (void)snprintf(srName, sizeof(srName), "source-request%d%d", mSRid/10, mSRid%10);
                     msgFound = msg->findMessage(srName, &sourceRequest);
                     if(msgFound)
                         mSRid = (mSRid+1)%SRMax;
@@ -1296,8 +1295,7 @@ void DashPlayer::finishReset() {
        sourceRequest = NULL;
        for (int id = 0; id < SRMax; id++){
            char srName[] = "source-request00";
-           srName[strlen("source-request")] += id/10;
-           srName[strlen("source-request")+sizeof(char)] += id%10;
+           (void)snprintf(srName, sizeof(srName), "source-request%d%d", id/10, id%10);
            mSourceNotify->findMessage(srName, &sourceRequest);
            sourceRequest = NULL;
        }
@@ -1663,7 +1661,7 @@ void DashPlayer::renderBuffer(bool audio, const sp<AMessage> &msg) {
                     {
                       OMX_QCOM_EXTRADATA_USERDATA *userdata = (OMX_QCOM_EXTRADATA_USERDATA *)pExtra->data;
                       OMX_U8 *data_ptr = (OMX_U8 *)userdata->data;
-                      OMX_U32 userdata_size = pExtra->nDataSize - sizeof(userdata->type);
+                      OMX_U32 userdata_size = pExtra->nDataSize - (OMX_U32)sizeof(userdata->type);
 
                       DP_MSG_LOW(
                         "--------------  OMX_ExtraDataMP2UserData Userdata  -------------\n"
@@ -2103,7 +2101,7 @@ void DashPlayer::sendTextPacket(sp<ABuffer> accessUnit,status_t err, TimedTextTy
     parcel.writeInt32(KEY_START_TIME);
     parcel.writeInt32((int32_t)(mediaTimeUs / 1000));  // convert micro sec to milli sec
 
-    DP_MSG_HIGH("sendTextPacket Text Track Timestamp (%0.2f) sec",mediaTimeUs / 1E6);
+    DP_MSG_HIGH("sendTextPacket Text Track Timestamp (%0.2f) sec",(double)mediaTimeUs / 1E6);
 
     int32_t height = 0;
     if (accessUnit->meta()->findInt32("height", &height)) {
@@ -2326,10 +2324,18 @@ status_t DashPlayer::PushBlankBuffersToNativeWindow(sp<ANativeWindow> nativeWind
         return err;
     }
 
-    err = native_window_set_buffers_geometry(nativeWindow.get(), 1, 1,
+    err = native_window_set_buffers_dimensions(nativeWindow.get(),
+            1, 1);
+    if (err != NO_ERROR) {
+        ALOGE("error pushing blank frames: set_buffers_dimensions failed: %s (%d)",
+                strerror(-err), -err);
+        goto error;
+    }
+
+    err = native_window_set_buffers_format(nativeWindow.get(),
             HAL_PIXEL_FORMAT_RGBX_8888);
     if (err != NO_ERROR) {
-        ALOGE("error pushing blank frames: set_buffers_geometry failed: %s (%d)",
+        ALOGE("error pushing blank frames: set_buffers_format failed: %s (%d)",
                 strerror(-err), -err);
         goto error;
     }

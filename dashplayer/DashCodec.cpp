@@ -1740,7 +1740,7 @@ void DashCodec::sendFormatChange() {
         {
             OMX_VIDEO_PORTDEFINITIONTYPE *videoDef = &def->format.video;
 
-            //notify->setString("mime", MEDIA_MIMETYPE_VIDEO_RAW);
+            (sp<AMessage>notify)->setString("mime", MEDIA_MIMETYPE_VIDEO_RAW);
             notify->setInt32("width", videoDef->nFrameWidth);
             notify->setInt32("height", videoDef->nFrameHeight);
             notify->setInt32("stride", videoDef->nStride);
@@ -1827,7 +1827,7 @@ void DashCodec::sendFormatChange() {
             CHECK_EQ((int)params.eNumData, (int)OMX_NumericalDataSigned);
             CHECK_EQ((int)params.ePCMMode, (int)OMX_AUDIO_PCMModeLinear);
 
-            //notify->setString("mime", MEDIA_MIMETYPE_AUDIO_RAW);
+            (sp<AMessage>notify)->setString("mime", MEDIA_MIMETYPE_AUDIO_RAW);
             notify->setInt32("channel-count", params.nChannels);
             notify->setInt32("sample-rate", params.nSamplingRate);
 
@@ -1882,7 +1882,7 @@ status_t DashCodec::PushBlankBuffersToNativeWindow(sp<ANativeWindow> nativeWindo
 
     err = native_window_set_buffers_dimensions(nativeWindow.get(),
             1, 1);
-    if (err != 0) {
+    if (err != NO_ERROR) {
         DC_MSG_ERROR("error pushing blank frames: set_buffers_dimensions failed: %s (%d)",
                 strerror(-err), -err);
         goto error;
@@ -1890,7 +1890,7 @@ status_t DashCodec::PushBlankBuffersToNativeWindow(sp<ANativeWindow> nativeWindo
 
     err = native_window_set_buffers_format(nativeWindow.get(),
             HAL_PIXEL_FORMAT_RGBX_8888);
-    if (err != 0) {
+    if (err != NO_ERROR) {
         DC_MSG_ERROR("error pushing blank frames: set_buffers_format failed: %s (%d)",
                 strerror(-err), -err);
         goto error;
