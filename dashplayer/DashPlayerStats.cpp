@@ -133,9 +133,9 @@ void DashPlayerStats::logStatistics() {
         Mutex::Autolock autoLock(mStatsLock);
         fprintf(mFileOut, "=====================================================\n");
         fprintf(mFileOut, "Mime Type: %s\n",mMIME);
-        fprintf(mFileOut, "Number of total frames: %llu\n",mTotalFrames);
-        fprintf(mFileOut, "Number of frames dropped: %lld\n",mNumVideoFramesDropped);
-        fprintf(mFileOut, "Number of frames rendered: %llu\n",mTotalRenderingFrames);
+        fprintf(mFileOut, "Number of total frames: %llu\n",(unsigned long long)mTotalFrames);
+        fprintf(mFileOut, "Number of frames dropped: %lld\n",(signed long long)mNumVideoFramesDropped);
+        fprintf(mFileOut, "Number of frames rendered: %llu\n",(unsigned long long)mTotalRenderingFrames);
         fprintf(mFileOut, "Percentage dropped: %.2f\n",
                            mTotalFrames == 0 ? 0.0 : (double)mNumVideoFramesDropped / (double)mTotalFrames);
         fprintf(mFileOut, "=====================================================\n");
@@ -145,7 +145,7 @@ void DashPlayerStats::logStatistics() {
 void DashPlayerStats::logPause(int64_t positionUs) {
     if(mFileOut) {
         fprintf(mFileOut, "=====================================================\n");
-        fprintf(mFileOut, "Pause position: %lld ms\n",positionUs/1000);
+        fprintf(mFileOut, "Pause position: %lld ms\n",(signed long long)positionUs/1000);
         fprintf(mFileOut, "=====================================================\n");
     }
 }
@@ -154,8 +154,8 @@ void DashPlayerStats::logSeek(int64_t seekTimeUs) {
     if(mFileOut) {
         Mutex::Autolock autoLock(mStatsLock);
         fprintf(mFileOut, "=====================================================\n");
-        fprintf(mFileOut, "Seek position: %lld ms\n",seekTimeUs/1000);
-        fprintf(mFileOut, "Seek latency: %lld ms\n",(getTimeOfDayUs() - mFirstFrameLatencyStartUs)/1000);
+        fprintf(mFileOut, "Seek position: %lld ms\n",(signed long long)seekTimeUs/1000);
+        fprintf(mFileOut, "Seek latency: %lld ms\n",(signed long long)(getTimeOfDayUs() - mFirstFrameLatencyStartUs)/1000);
         fprintf(mFileOut, "=====================================================\n");
     }
 }
@@ -183,9 +183,9 @@ void DashPlayerStats::logSyncLoss() {
         Mutex::Autolock autoLock(mStatsLock);
         fprintf(mFileOut, "=====================================================\n");
         fprintf(mFileOut, "Number of times AV Sync Losses = %u\n", mNumTimesSyncLoss);
-        fprintf(mFileOut, "Max Video Ahead time delta = %lld\n", -mMaxEarlyDelta/1000);
-        fprintf(mFileOut, "Max Video Behind time delta = %lld\n", mMaxLateDelta/1000);
-        fprintf(mFileOut, "Max Time sync loss = %lld\n",mMaxTimeSyncLoss/1000);
+        fprintf(mFileOut, "Max Video Ahead time delta = %lld\n", (signed long long)-mMaxEarlyDelta/1000);
+        fprintf(mFileOut, "Max Video Behind time delta = %lld\n", (signed long long)mMaxLateDelta/1000);
+        fprintf(mFileOut, "Max Time sync loss = %lld\n",(signed long long)mMaxTimeSyncLoss/1000);
         fprintf(mFileOut, "=====================================================\n");
     }
 }
@@ -207,7 +207,7 @@ void DashPlayerStats::logFps() {
              if (mStatisticsFrames == 0) {
                  fps =((double)(mTotalRenderingFrames - mLastFrame - 1) * 1E6)/(double)diff;
              }
-             fprintf(mFileOut, "Frames per second: %.4f, Duration of measurement: %lld\n", fps,diff);
+             fprintf(mFileOut, "Frames per second: %.4f, Duration of measurement: %lld\n", fps,(signed long long)diff);
              mFPSSumUs += fps;
              ++mStatisticsFrames;
              mLastFrameUs = now;
@@ -252,7 +252,7 @@ int64_t DashPlayerStats::getTimeOfDayUs() {
 // WARNING: Most private functions are only thread-safe within mStatsLock
 inline void DashPlayerStats::logFirstFrame() {
     fprintf(mFileOut, "=====================================================\n");
-    fprintf(mFileOut, "First frame latency: %lld ms\n",(getTimeOfDayUs()-mFirstFrameLatencyStartUs)/1000);
+    fprintf(mFileOut, "First frame latency: %lld ms\n",(signed long long)(getTimeOfDayUs()-mFirstFrameLatencyStartUs)/1000);
     fprintf(mFileOut, "=====================================================\n");
     mVeryFirstFrame = false;
 }
