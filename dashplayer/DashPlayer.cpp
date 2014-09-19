@@ -400,9 +400,6 @@ void DashPlayer::onMessageReceived(const sp<AMessage> &msg) {
               mSource->start();
             }
 
-            // for qualcomm statistics profiling
-            mStats = new DashPlayerStats();
-
             mRenderer = new Renderer(
                     mAudioSink,
                     new AMessage(kWhatRendererNotify, id()));
@@ -426,6 +423,15 @@ void DashPlayer::onMessageReceived(const sp<AMessage> &msg) {
                 }
 
                 mScanSourcesPending = false;
+
+                //Exit scanSources if source was destroyed
+                //Later after source gets recreated and started (setDataSource() and start()) scanSources is posted again
+                if (mSource == NULL)
+                {
+                  DP_MSG_ERROR("Source is null. Exit scanSources\n");
+                  break;
+                }
+
                 DP_MSG_LOW("scanning sources haveAudio=%d, haveVideo=%d haveText=%d",
                 mAudioDecoder != NULL, mVideoDecoder != NULL, mTextDecoder!= NULL);
 
