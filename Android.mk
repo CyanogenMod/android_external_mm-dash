@@ -1,5 +1,4 @@
-# This project has been split from caf media as of caf-kk3.10
-ifeq ($(TARGET_QCOM_MEDIA_VARIANT),caf-kk3.10)
+ifeq ($(call is-board-platform-in-list,msm8916),true)
 
 QCOM_MEDIA_ROOT := $(call my-dir)
 ifneq ($(TARGET_DISABLE_DASH),true)
