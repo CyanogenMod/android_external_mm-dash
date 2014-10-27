@@ -102,14 +102,17 @@ void DashPlayer::Decoder::onConfigure(const sp<AMessage> &format) {
 
     mCodec->getName(&mComponentName);
 
+    status_t err;
     if (mNativeWindow != NULL) {
         // disconnect from surface as MediaCodec will reconnect
-        CHECK_EQ((int)NO_ERROR,
-                native_window_api_disconnect(
-                        surface.get(),
-                        NATIVE_WINDOW_API_MEDIA));
+        err = native_window_api_disconnect(
+                surface.get(), NATIVE_WINDOW_API_MEDIA);
+        // We treat this as a warning, as this is a preparatory step.
+        // Codec will try to connect to the surface, which is where
+        // any error signaling will occur.
+        ALOGW_IF(err != OK, "failed to disconnect from surface: %d", err);
     }
-    status_t err = mCodec->configure(
+    err = mCodec->configure(
             format, surface, NULL /* crypto */, 0 /* flags */);
     if (err != OK) {
         DPD_MSG_ERROR("Failed to configure %s decoder (err=%d)", mComponentName.c_str(), err);
@@ -457,10 +460,13 @@ void DashPlayer::Decoder::onShutdown() {
 
         if (mNativeWindow != NULL) {
             // reconnect to surface as MediaCodec disconnected from it
-            CHECK_EQ((int)NO_ERROR,
+            status_t error =
                     native_window_api_connect(
                             mNativeWindow->getNativeWindow().get(),
-                            NATIVE_WINDOW_API_MEDIA));
+                            NATIVE_WINDOW_API_MEDIA);
+            ALOGW_IF(error != NO_ERROR,
+                    "[%s] failed to connect to native window, error=%d",
+                    mComponentName.c_str(), error);
         }
         mComponentName = "decoder";
     }
