@@ -438,7 +438,7 @@ void DashPlayer::Decoder::onFlush() {
     if (err != OK) {
         DPD_MSG_ERROR("failed to flush %s (err=%d)", mComponentName.c_str(), err);
         handleError(err);
-        return;
+        // finish with posting kWhatFlushCompleted.
     }
 
     sp<AMessage> notify = mNotify->dup();
@@ -474,7 +474,7 @@ void DashPlayer::Decoder::onShutdown() {
     if (err != OK) {
         DPD_MSG_ERROR("failed to release %s (err=%d)", mComponentName.c_str(), err);
         handleError(err);
-        return;
+        // finish with posting kWhatShutdownCompleted.
     }
 
     sp<AMessage> notify = mNotify->dup();
