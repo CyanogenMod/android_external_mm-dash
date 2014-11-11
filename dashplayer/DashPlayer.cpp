@@ -1428,8 +1428,9 @@ status_t DashPlayer::feedDecoderInputData(int track, const sp<AMessage> &msg) {
     {
         Mutex::Autolock autoLock(mLock);
 
-        if (((track == kAudio) && IsFlushingState(mFlushingAudio))
-            || ((track == kVideo) && IsFlushingState(mFlushingVideo))) {
+        if (((track == kAudio) && mFlushingAudio != NONE)
+            || ((track == kVideo) && mFlushingVideo != NONE)
+            || mSource == NULL) {
             reply->setInt32("err", INFO_DISCONTINUITY);
             reply->post();
             return OK;
