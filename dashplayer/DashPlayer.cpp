@@ -970,7 +970,7 @@ void DashPlayer::onMessageReceived(const sp<AMessage> &msg) {
               }
             }
 
-            if (status != OK)
+            if (status != OK && status != ERROR_END_OF_STREAM)
             {
               //Notify error?
               DP_MSG_ERROR(" Dash Source playback discontinuity check failure");
@@ -1912,12 +1912,13 @@ status_t DashPlayer::getParameter(int key, Parcel *reply)
     {
        uint64_t nMin = 0, nMax = 0, nMaxDepth = 0;
        err = mSource->getRepositionRange(&nMin, &nMax, &nMaxDepth);
-       if(err == OK)
+       if(err == OK || err  == ERROR_END_OF_STREAM)
        {
          reply->setDataPosition(0);
          reply->writeInt64(nMin);
          reply->writeInt64(nMax);
          reply->writeInt64(nMaxDepth);
+         err = OK;
          DP_MSG_LOW("DashPlayer::getParameter KEY_DASH_REPOSITION_RANGE %lld, %lld", nMin, nMax);
        }
        else
