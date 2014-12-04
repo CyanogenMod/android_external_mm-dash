@@ -856,12 +856,12 @@ void DashPlayer::onMessageReceived(const sp<AMessage> &msg) {
                     flushDecoder( true, true );  // flush audio,  shutdown
                 }
                 if( mAudioDecoder == NULL ) {
-                    DP_MSG_LOW("Audio is not there, set it to shutdown");
-                    mFlushingAudio = SHUT_DOWN;
+                    DP_MSG_LOW("Audio is not there, set flushing state to none");
+                    mFlushingAudio = NONE;
                 }
                 if( mVideoDecoder == NULL ) {
-                    DP_MSG_LOW("Video is not there, set it to shutdown");
-                    mFlushingVideo = SHUT_DOWN;
+                    DP_MSG_LOW("Video is not there, set flushing state to none");
+                    mFlushingVideo = NONE;
                 }
             }
             else if (nRet != PERMISSION_DENIED) {
@@ -945,12 +945,12 @@ void DashPlayer::onMessageReceived(const sp<AMessage> &msg) {
                     flushDecoder( true, true );  // flush audio,  shutdown
                   }
                   if( mAudioDecoder == NULL ) {
-                    DP_MSG_MEDIUM("Audio is not there, set it to shutdown");
-                    mFlushingAudio = SHUT_DOWN;
+                    DP_MSG_MEDIUM("Audio is not there, set flushing state to none");
+                    mFlushingAudio = NONE;
                   }
                   if( mVideoDecoder == NULL ) {
-                    DP_MSG_MEDIUM("Video is not there, set it to shutdown");
-                    mFlushingVideo = SHUT_DOWN;
+                    DP_MSG_MEDIUM("Video is not there, set flushing state to none");
+                    mFlushingVideo = NONE;
                   }
 
                   if (mDriver != NULL)
