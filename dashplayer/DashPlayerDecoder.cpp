@@ -21,12 +21,12 @@
 #include <media/ICrypto.h>
 #include "ESDS.h"
 #include "QCMediaDefs.h"
-#include "QCMetaData.h"
 #include <media/stagefright/MediaCodec.h>
 #include <media/stagefright/MediaDefs.h>
 #include <media/stagefright/MediaErrors.h>
 #include <media/stagefright/MetaData.h>
 #include <media/stagefright/Utils.h>
+#include "QCMetaData.h"
 #include <cutils/properties.h>
 #include <utils/Log.h>
 #include <media/stagefright/foundation/ABitReader.h>
