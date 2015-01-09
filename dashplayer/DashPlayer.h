@@ -26,23 +26,24 @@
 #include <media/stagefright/foundation/ADebug.h>
 #include <media/stagefright/foundation/AMessage.h>
 
-#define KEY_QCTIMEDTEXT_LISTENER 6000
-
-//Keys for playback modes
+//Keys for playback modes within TSB
 #define KEY_DASH_SEEK_EVENT 7001
 #define KEY_DASH_PAUSE_EVENT 7002
 #define KEY_DASH_RESUME_EVENT 7003
 
-// used for Get Adaptionset property (NonJB)and for both Get and set for JB
 #define KEY_DASH_ADAPTION_PROPERTIES 8002
 #define KEY_DASH_MPD_QUERY           8003
 #define KEY_DASH_QOE_EVENT           8004
 #define KEY_DASH_QOE_PERIODIC_EVENT  8008
+//Keys to get and set mpd properties xml string
 #define KEY_DASH_GET_ADAPTION_PROPERTIES 8010
 #define KEY_DASH_SET_ADAPTION_PROPERTIES 8011
 
 //Key to query reposition range
 #define KEY_DASH_REPOSITION_RANGE    9000
+
+//Key to push blank frame to native window
+#define INVOKE_ID_PUSH_BLANK_FRAME 9001
 
 namespace android {
 
@@ -89,8 +90,7 @@ struct DashPlayer : public AHandler {
     status_t getParameter(int key, Parcel *reply);
     status_t setParameter(int key, const Parcel &request);
     status_t dump(int fd, const Vector<String16> &args);
-
-    void setQCTimedTextListener(const bool val);
+    status_t pushBlankBuffersToNativeWindow();
 
     status_t getSelectedTrack(int32_t type, Parcel* reply);
 public:
@@ -287,7 +287,6 @@ private:
     void performDecoderShutdown(bool audio, bool video);
     void performScanSources();
     void performSetSurface(const sp<NativeWindowWrapper> &wrapper);
-    status_t PushBlankBuffersToNativeWindow(sp<ANativeWindow> nativeWindow);
 
     int mLogLevel;
     bool mTimedTextCEAPresent;
@@ -295,8 +294,6 @@ private:
     //Set and reset in cases of seek/resume-out-of-tsb to signal discontinuity in CEA timedtextsamples
     bool mTimedTextCEASamplesDisc;
 
-    //Tells if app registered for a QCTimedText Listener. If not registered do not send text samples above.
-    bool mQCTimedTextListenerPresent;
     void onClosedCaptionNotify(const sp<AMessage> &msg);
     void sendSubtitleData(const sp<ABuffer> &buffer, int32_t baseIndex);
     void writeTrackInfo(Parcel* reply, const sp<AMessage> format) const;

@@ -291,10 +291,6 @@ player_type DashPlayerDriver::playerType() {
     return DASH_PLAYER;
 }
 
-void DashPlayerDriver::setQCTimedTextListener(const bool val) {
-  mPlayer->setQCTimedTextListener(val);
-}
-
 status_t DashPlayerDriver::invoke(const Parcel &request, Parcel *reply) {
    status_t ret = INVALID_OPERATION;
 
@@ -333,6 +329,7 @@ status_t DashPlayerDriver::invoke(const Parcel &request, Parcel *reply) {
          ret = getParameter(methodId,reply);
          break;
        }
+
        case KEY_DASH_QOE_EVENT:
            DPD_MSG_HIGH("calling KEY_DASH_QOE_EVENT");
            ret = setParameter(methodId,request);
@@ -387,23 +384,13 @@ status_t DashPlayerDriver::invoke(const Parcel &request, Parcel *reply) {
           break;
        }
 
-       case KEY_QCTIMEDTEXT_LISTENER:
+       case INVOKE_ID_PUSH_BLANK_FRAME:
        {
-         DPD_MSG_HIGH("calling KEY_QCTIMEDTEXT_LISTENER");
-
-         int32_t val = 0;
-         ret = request.readInt32(&val);
-         if (ret != OK)
-         {
-           DPD_MSG_ERROR("Invoke KEY_QCTIMEDTEXT_LISTENER: invalid val");
-         }
-         else
-         {
-           bool bVal = (val == 1)? true:false;
-           setQCTimedTextListener(bVal);
+           DPD_MSG_HIGH("calling INVOKE_ID_PUSH_BLANK_FRAME");
+           ret = mPlayer->pushBlankBuffersToNativeWindow();
+           int32_t val = (ret == OK)? 1:0;
            reply->setDataPosition(0);
-           reply->writeInt32(1);
-         }
+           reply->writeInt32(val);
          break;
        }
 

@@ -135,7 +135,6 @@ DashPlayer::DashPlayer()
       mLogLevel(0),
       mTimedTextCEAPresent(false),
       mTimedTextCEASamplesDisc(false),
-      mQCTimedTextListenerPresent(false),
       mCurrentWidth(0),
       mCurrentHeight(0),
       mColorFormat(0) {
@@ -317,20 +316,22 @@ void DashPlayer::onMessageReceived(const sp<AMessage> &msg) {
             /* from dash source.                                                    */
             DP_MSG_ERROR("kWhatSetVideoNativeWindow");
 
-/*
-              if existing instance mNativeWindow=NULL, just set mNativeWindow to the new value passed
-              postScanSources() called below to handle use case
-                 - Initial valid nativewindow
-                 - first call from app to set nativewindow to null but mVideoDecoder exists. So scansources loop will not be running
-                 - second call to set nativewindow to valid object. Enters below if() portion. Need to trigger scansources to instatiate mVideoDecoder
+            /* if existing instance mNativeWindow=NULL updates mNativeWindow to new
+             * new value and triggers scan sources. postScanSources() needs to be
+             * triggered to handle foll. use case
+             *    -> Initial valid nativewindow exists
+             *    -> apps calls setDisplay(NULL). This shuts down video decoder
+             *       if exists
+             *    -> app later sets valid display. Now will need to trigger
+             *       scansources to reinstatiate video decoder
             */
             if(mNativeWindow == NULL)
             {
-            sp<RefBase> obj;
-            CHECK(msg->findObject("native-window", &obj));
+              sp<RefBase> obj;
+              CHECK(msg->findObject("native-window", &obj));
 
-            mNativeWindow = static_cast<NativeWindowWrapper *>(obj.get());
-              DP_MSG_ERROR("kWhatSetVideoNativeWindow valid nativewindow  %p", mNativeWindow.get());
+              mNativeWindow = static_cast<NativeWindowWrapper *>(obj.get());
+              DP_MSG_HIGH("kWhatSetVideoNativeWindow valid nativewindow  %p", mNativeWindow.get());
               if (mDriver != NULL) {
               sp<DashPlayerDriver> driver = mDriver.promote();
               if (driver != NULL) {
@@ -338,32 +339,44 @@ void DashPlayer::onMessageReceived(const sp<AMessage> &msg) {
                 }
               }
 
-              DP_MSG_ERROR("kWhatSetVideoNativeWindow nativewindow %d", mScanSourcesPending);
+              DP_MSG_HIGH("kWhatSetVideoNativeWindow scanSourcesPending = %d", mScanSourcesPending);
               postScanSources();
               break;
             }
 
-/* Already existing valid mNativeWindow and valid mVideoDecoder
-                 - Perform shutdown sequence
-                 - postScanSources() to instantiate mVideoDecoder with the new native window object.
-               If no mVideoDecoder existed, and new nativewindow set to NULL push blank buffers to native window (embms audio only switch use case)
+            /* Comes here if existing native window instance was not NULL.
+             * Does ShutdownDecoderAction followed by SetSurfaceAction
+             * followed by performScanSources
             */
 
             sp<RefBase> obj;
             CHECK(msg->findObject("native-window", &obj));
 
+
+            /* eMBMS switch to audio only channel use case events sequence
+             * 1. On a channel switch app creates mediaplayer, calls setDisplay()
+             *    with valid surface and prepareAsync() to download mpd
+             * 2. app gets TrackInfo to check if no video track is present
+             * 3. if no video track calls setDisplay(NULL) to push blank frame on
+             *    the earlier surface and sets new surface to NULL
+             *
+             * Below condition checks that if decoder instance is also NULL
+             * and then only pushes blank frame. This is to avoid pushing blank frame
+             * every time setDisplay(NULL) is called.
+             * From L release application can instead use new QCMediaPlayer call
+             * pushBlankFrametoDisplay() rather than calling setDisplay(NULL)
+             */
             if(mVideoDecoder == NULL && obj.get() == NULL)
             {
-              sp<ANativeWindow> nativeWindow = mNativeWindow->getNativeWindow();
-              PushBlankBuffersToNativeWindow(nativeWindow);
+              //push blank buffers on existing native window
+              pushBlankBuffersToNativeWindow();
             }
 
             mDeferredActions.push_back(new ShutdownDecoderAction(
                                        false /* audio */, true /* video */));
 
-            DP_MSG_ERROR("kWhatSetVideoNativeWindow old nativewindow  %p", mNativeWindow.get());
-            DP_MSG_ERROR("kWhatSetVideoNativeWindow new nativewindow  %p", obj.get());
-
+            DP_MSG_HIGH("kWhatSetVideoNativeWindow old %p", mNativeWindow.get());
+            DP_MSG_HIGH("kWhatSetVideoNativeWindow new %p", obj.get());
             mDeferredActions.push_back(
             new SetSurfaceAction(static_cast<NativeWindowWrapper *>(obj.get())));
 
@@ -1057,7 +1070,15 @@ void DashPlayer::onMessageReceived(const sp<AMessage> &msg) {
                     }
                 }
                 DP_MSG_ERROR("PrepareDone complete\n");
-                notifyListener(MEDIA_PREPARED, 0, 0);
+
+                Parcel mpdAttributes;
+                err = getParameter(KEY_DASH_GET_ADAPTION_PROPERTIES, &mpdAttributes);
+                if(err == OK) {
+                    notifyListener(MEDIA_PREPARED, 0, 0, &mpdAttributes);
+                } else {
+                    DP_MSG_ERROR("getParameter mpd attirbutes failed\n");
+                    notifyListener(MEDIA_ERROR, MEDIA_ERROR_UNKNOWN, err);
+                }
             } else if(err == -EWOULDBLOCK) {
                 msg->post(100000ll);
             } else {
@@ -1769,13 +1790,10 @@ void DashPlayer::renderBuffer(bool audio, const sp<AMessage> &msg) {
                       OMX_QCOM_EXTRADATA_USERDATA *userdata = (OMX_QCOM_EXTRADATA_USERDATA *)pExtra->data;
                       OMX_U8 *data_ptr = (OMX_U8 *)userdata->data;
                       OMX_U32 userdata_size = pExtra->nDataSize - (OMX_U32)sizeof(userdata->type);
-                      if (!mQCTimedTextListenerPresent)
+                      if (mCCDecoder != NULL)
                       {
-                        if (mCCDecoder != NULL)
-                        {
                           DP_MSG_HIGH("mCCDecoder->decode %lld",mediaTimeUs);
                           mCCDecoder->decode(data_ptr, userdata_size, mediaTimeUs);
-                        }
                       }
                       else
                       {
@@ -1886,8 +1904,7 @@ void DashPlayer::renderBuffer(bool audio, const sp<AMessage> &msg) {
             }
           }
         }
-        if (!mQCTimedTextListenerPresent &&
-             mCCDecoder != NULL && mCCDecoder->isSelected())
+        if (mCCDecoder != NULL && mCCDecoder->isSelected())
         {
           DP_MSG_HIGH("Calling CCDecoder->display for TS %lld", mediaTimeUs);
           mCCDecoder->display(mediaTimeUs);
@@ -2261,11 +2278,6 @@ void DashPlayer::postIsPrepareDone()
 }
 void DashPlayer::sendTextPacket(sp<ABuffer> accessUnit,status_t err, TimedTextType eTimedTextType)
 {
-    if(!mQCTimedTextListenerPresent)
-    {
-      return;
-    }
-
     Parcel parcel;
     int mFrameType = TIMED_TEXT_FLAG_FRAME;
 
@@ -2432,12 +2444,6 @@ status_t DashPlayer::dump(int fd, const Vector<String16> &/*args*/)
     return OK;
 }
 
-void DashPlayer::setQCTimedTextListener(const bool val)
-{
-  mQCTimedTextListenerPresent = val;
-  DP_MSG_HIGH("QCTimedtextlistener turned %s", mQCTimedTextListenerPresent ? "ON" : "OFF");
-}
-
 void DashPlayer::processDeferredActions() {
     while (!mDeferredActions.empty()) {
         // We won't execute any deferred actions until we're no longer in
@@ -2531,12 +2537,19 @@ void DashPlayer::performDecoderShutdown(bool audio, bool video) {
     }
 }
 
+
 /** @brief: Pushes blank frame to native window
  *
  *  @return: NO_ERROR if frame pushed successfully to native window
  *
  */
-status_t DashPlayer::PushBlankBuffersToNativeWindow(sp<ANativeWindow> nativeWindow) {
+status_t DashPlayer::pushBlankBuffersToNativeWindow() {
+    if (mNativeWindow == NULL) {
+        DP_MSG_ERROR("pushBlankBuffersToNativeWindow called on NULL object\n");
+        return ((status_t)UNKNOWN_ERROR);
+    }
+
+    sp<ANativeWindow> nativeWindow = mNativeWindow->getNativeWindow();
     status_t err = NO_ERROR;
     ANativeWindowBuffer* anb = NULL;
     int numBufs = 0;
