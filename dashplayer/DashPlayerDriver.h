@@ -67,7 +67,6 @@ struct DashPlayerDriver : public MediaPlayerInterface {
     void notifyPosition(int64_t positionUs);
     void notifySeekComplete();
     void notifyListener(int msg, int ext1 = 0, int ext2 = 0, const Parcel *obj=NULL);
-    void setQCTimedTextListener(const bool val);
 
 protected:
     virtual ~DashPlayerDriver();
