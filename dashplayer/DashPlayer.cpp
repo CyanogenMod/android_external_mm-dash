@@ -524,6 +524,11 @@ void DashPlayer::onMessageReceived(const sp<AMessage> &msg) {
 
                 status_t err = feedDecoderInputData(
                         track, msg);
+                if (mSource == NULL)
+                {
+                  DP_MSG_ERROR("Source is null. Exit Notify\n");
+                  break;
+                }
 
                 if (err == -EWOULDBLOCK) {
                     status_t nRet = mSource->feedMoreTSData();
@@ -618,8 +623,10 @@ void DashPlayer::onMessageReceived(const sp<AMessage> &msg) {
 
                     DP_MSG_HIGH("Audio output format changed to %d Hz, %d channels",
                          sampleRate, numChannels);
-
-                    mAudioSink->close();
+                    if (mAudioSink != NULL)
+                    {
+                      mAudioSink->close();
+                    }
 
                     audio_output_flags_t flags;
                     int64_t durationUs;
@@ -627,6 +634,11 @@ void DashPlayer::onMessageReceived(const sp<AMessage> &msg) {
                     // we receive the format change indication. Current code will just make that
                     // we select deep buffer with video which should not be a problem as it should
                     // not prevent from keeping A/V sync.
+                    if (mSource == NULL)
+                    {
+                      DP_MSG_ERROR("Source is null. Exit outputFormatChanged\n");
+                      break;
+                    }
                     if (mVideoDecoder == NULL &&
                             mSource->getDuration(&durationUs) == OK &&
                             durationUs > AUDIO_SINK_MIN_DEEP_BUFFER_DURATION_US) {
@@ -767,7 +779,11 @@ void DashPlayer::onMessageReceived(const sp<AMessage> &msg) {
 
                 CHECK(msg->findInt64("videoLateByUs", &mVideoLateByUs));
                 DP_MSG_LOW("@@@@:: Dashplayer :: MESSAGE FROM RENDERER ***************** kWhatPosition:: position(%lld) VideoLateBy(%lld)",positionUs,mVideoLateByUs);
-
+                if (mSource == NULL)
+                {
+                  DP_MSG_ERROR("Source is null. Exit Notifyposition\n");
+                  break;
+                }
                 if (mDriver != NULL) {
                     sp<DashPlayerDriver> driver = mDriver.promote();
                     if (driver != NULL) {
@@ -844,6 +860,11 @@ void DashPlayer::onMessageReceived(const sp<AMessage> &msg) {
             int64_t seekTimeUs = -1, newSeekTime = -1;
             status_t nRet = OK;
             CHECK(msg->findInt64("seekTimeUs", &seekTimeUs));
+            if (mSource == NULL)
+            {
+              DP_MSG_ERROR("Source is null. Exit Seek\n");
+              break;
+            }
 
             DP_MSG_ERROR("kWhatSeek seekTimeUs=%lld us (%.2f secs)",
                  seekTimeUs, (double)seekTimeUs / 1E6);
@@ -925,6 +946,11 @@ void DashPlayer::onMessageReceived(const sp<AMessage> &msg) {
         case kWhatResume:
         {
             DP_MSG_ERROR("kWhatResume");
+            if (mSource == NULL)
+            {
+              DP_MSG_ERROR("Source is null. Exit Resume\n");
+              break;
+            }
             bool disc = mSource->isPlaybackDiscontinued();
             status_t status = OK;
 
@@ -1294,8 +1320,6 @@ void DashPlayer::finishReset() {
 
     if (mRenderer != NULL) {
         looper()->unregisterHandler(mRenderer->id());
-    }
-    if(mRenderer != NULL) {
         mRenderer.clear();
     }
 
@@ -1354,6 +1378,11 @@ status_t DashPlayer::instantiateDecoder(int track, sp<Decoder> *decoder) {
     if (*decoder != NULL) {
         return OK;
     }
+    if (mSource == NULL)
+    {
+      DP_MSG_ERROR("Source is null. Exit instantiateDecoder\n");
+      return -EWOULDBLOCK;
+    }
 
     sp<MetaData> meta = mSource->getFormat(track);
 
@@ -1362,7 +1391,7 @@ status_t DashPlayer::instantiateDecoder(int track, sp<Decoder> *decoder) {
     }
 
     if (track == kVideo) {
-        const char *mime;
+        const char *mime = NULL;
         CHECK(meta->findCString(kKeyMIMEType, &mime));
         mVideoIsAVC = !strcasecmp(MEDIA_MIMETYPE_VIDEO_AVC, mime);
         if(mStats != NULL) {
@@ -1422,7 +1451,7 @@ status_t DashPlayer::instantiateDecoder(int track, sp<Decoder> *decoder) {
         mFlushingVideo = NONE;
     }
 
-    if( track == kAudio || track == kVideo) {
+    if( (track == kAudio || track == kVideo) && ((*decoder) != NULL)) {
         (*decoder)->init();
         (*decoder)->configure(meta);
     }
@@ -2018,7 +2047,7 @@ status_t DashPlayer::getParameter(int key, Parcel *reply)
 
 status_t DashPlayer::setParameter(int key, const Parcel &request)
 {
-    status_t err = OK;
+    status_t err = (status_t)UNKNOWN_ERROR;;
     if (KEY_DASH_ADAPTION_PROPERTIES == key ||
         KEY_DASH_SET_ADAPTION_PROPERTIES == key)
     {
@@ -2032,12 +2061,18 @@ status_t DashPlayer::setParameter(int key, const Parcel &request)
         }
 
         utf16_to_utf8(str, len, (char*) data);
-        err = mSource->setParameter(key, data, len);
+        if (mSource != NULL)
+        {
+          err = mSource->setParameter(key, data, len);
+        }
         free(data);
     }else if(key == KEY_DASH_QOE_EVENT)
     {
       int value  = request.readInt32();
-      err = mSource->setParameter(key, &value, sizeof(value));
+      if (mSource != NULL)
+      {
+        err = mSource->setParameter(key, &value, sizeof(value));
+      }
     }
     return err;
 }
