@@ -1,5 +1,5 @@
 /*
- *Copyright (c) 2013-2014, The Linux Foundation. All rights reserved.
+ *Copyright (c) 2013-2015, The Linux Foundation. All rights reserved.
  *Not a Contribution, Apache license notifications and license are retained
  *for attribution purposes only.
  *
@@ -1428,9 +1428,9 @@ status_t DashPlayer::feedDecoderInputData(int track, const sp<AMessage> &msg) {
     {
         Mutex::Autolock autoLock(mLock);
 
-        if (((track == kAudio) && mFlushingAudio != NONE)
+        if (reply != NULL && (((track == kAudio) && mFlushingAudio != NONE)
             || ((track == kVideo) && mFlushingVideo != NONE)
-            || mSource == NULL) {
+            || mSource == NULL)) {
             reply->setInt32("err", INFO_DISCONTINUITY);
             reply->post();
             return OK;
