@@ -877,12 +877,12 @@ void DashPlayer::onMessageReceived(const sp<AMessage> &msg) {
                     flushDecoder( true, true );  // flush audio,  shutdown
                 }
                 if( mAudioDecoder == NULL ) {
-                    DP_MSG_LOW("Audio is not there, set flushing state to none");
-                    mFlushingAudio = NONE;
+                    DP_MSG_LOW("Audio is not there, set it to shutdown");
+                    mFlushingAudio = SHUT_DOWN;
                 }
                 if( mVideoDecoder == NULL ) {
-                    DP_MSG_LOW("Video is not there, set flushing state to none");
-                    mFlushingVideo = NONE;
+                    DP_MSG_LOW("Video is not there, set it to shutdown");
+                    mFlushingVideo = SHUT_DOWN;
                 }
             }
             else if (nRet != PERMISSION_DENIED) {
@@ -971,12 +971,12 @@ void DashPlayer::onMessageReceived(const sp<AMessage> &msg) {
                     flushDecoder( true, true );  // flush audio,  shutdown
                   }
                   if( mAudioDecoder == NULL ) {
-                    DP_MSG_MEDIUM("Audio is not there, set flushing state to none");
-                    mFlushingAudio = NONE;
+                    DP_MSG_MEDIUM("Audio is not there, set it to shutdown");
+                    mFlushingAudio = SHUT_DOWN;
                   }
                   if( mVideoDecoder == NULL ) {
-                    DP_MSG_MEDIUM("Video is not there, set flushing state to none");
-                    mFlushingVideo = NONE;
+                    DP_MSG_MEDIUM("Video is not there, set it to shutdown");
+                    mFlushingVideo = SHUT_DOWN;
                   }
 
                   if (mDriver != NULL)
@@ -2263,7 +2263,8 @@ void DashPlayer::processDeferredActions() {
             }
         }
 
-        if (mFlushingAudio != NONE || mFlushingVideo != NONE) {
+        if ((mFlushingAudio != NONE && mFlushingAudio != SHUT_DOWN)
+              || (mFlushingVideo != NONE && mFlushingVideo != SHUT_DOWN)) {
             // We're currently flushing, postpone the reset until that's
             // completed.
 
