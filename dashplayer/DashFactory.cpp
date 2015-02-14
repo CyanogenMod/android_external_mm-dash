@@ -30,20 +30,13 @@ class DashPlayerFactory : public MediaPlayerFactory::IFactory {
   public:
     virtual float scoreFactory(const sp<IMediaPlayer>& /*client*/,
                                const char* url,
-                               float curScore) {
-        static const float kOurScore = 0.8f;
-
-        if (kOurScore <= curScore)
-            return 0.0;
-
+                               float /*curScore*/) {
         if (!strncasecmp("http://", url, 7)) {
             size_t len = strlen(url);
-            if (len >= 5 && !strcasecmp(".mpd", &url[len - 4])) {
-                return kOurScore;
-            }
-
-            if (strstr(url,"mpd")) {
-                return kOurScore;
+            if ((len >= 5 && !strcasecmp(".mpd", &url[len - 4]))
+                    || strstr(url,"mpd")) {
+                ALOGI("Using DashPlayer for .mpd");
+                return 1.0;
             }
         }
         return 0.0;
