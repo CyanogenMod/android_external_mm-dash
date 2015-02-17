@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010 The Android Open Source Project
+ * Copyright (C) 2015 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -103,7 +103,7 @@ void DashPlayer::Decoder::onConfigure(const sp<AMessage> &format) {
     mCodec->getName(&mComponentName);
 
     status_t err;
-    if (mNativeWindow != NULL) {
+    if (mNativeWindow != NULL && surface != NULL) {
         // disconnect from surface as MediaCodec will reconnect
         err = native_window_api_disconnect(
                 surface.get(), NATIVE_WINDOW_API_MEDIA);
