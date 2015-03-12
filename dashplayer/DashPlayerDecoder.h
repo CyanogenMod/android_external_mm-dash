@@ -21,6 +21,7 @@
 #include "DashPlayerRenderer.h"
 #include "DashPlayer.h"
 #include <media/stagefright/foundation/AHandler.h>
+#include "OMX_QCOMExtns.h"
 
 namespace android {
 
@@ -99,6 +100,49 @@ private:
 
     DISALLOW_EVIL_CONSTRUCTORS(Decoder);
 };
+
+struct DashPlayer::CCDecoder : public RefBase{
+    enum {
+        kWhatClosedCaptionData,
+        kWhatTrackAdded,
+    };
+
+    CCDecoder(const sp<AMessage> &notify);
+
+    size_t getTrackCount() const;
+    sp<AMessage> getTrackInfo(size_t index) const;
+    status_t selectTrack(size_t index, bool select);
+    bool isSelected() const;
+    void decode(const sp<ABuffer> &accessUnit);
+    void display(int64_t timeUs);
+    void flush();
+    void decode(OMX_U8 *pictureUserData, OMX_U32 pictureUserDataSize, int64_t mediaTimeUs);
+    int getSelectedTrack();
+
+private:
+    sp<AMessage> mNotify;
+    KeyedVector<int64_t, sp<ABuffer> > mCCMap;
+    size_t mCurrentChannel;
+    int32_t mSelectedTrack;
+    int32_t mTrackIndices[4];
+    Vector<size_t> mFoundChannels;
+
+    bool isTrackValid(size_t index) const;
+    int32_t getTrackIndex(size_t channel) const;
+    //bool extractFromSEI(const sp<ABuffer> &accessUnit);
+    bool extractPictureUserData(OMX_U8 *pictureUserDatae, OMX_U32 pictureUserDataSize, int64_t mediaTimeUs);
+    sp<ABuffer> filterCCBuf(const sp<ABuffer> &ccBuf, size_t index);
+    void printmCCMap();
+    void PrintCCTypeCombo(bool cc_valid,uint8_t cc_type);
+
+    int32_t mCurrentWidth;
+    int32_t mCurrentHeight;
+    int32_t mColorFormat;
+
+
+    DISALLOW_EVIL_CONSTRUCTORS(CCDecoder);
+};
+
 
 }  // namespace android
 
