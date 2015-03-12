@@ -396,12 +396,32 @@ status_t DashPlayerDriver::invoke(const Parcel &request, Parcel *reply) {
 
        case INVOKE_ID_GET_TRACK_INFO:
        {
-         // Ignore the invoke call for INVOKE_ID_GET_TRACK_INFO with success return code
-         // to avoid mediaplayer java exception
          DPD_MSG_HIGH("Calling INVOKE_ID_GET_TRACK_INFO to invoke");
          ret = getParameter(methodId,reply);
          break;
        }
+
+        case INVOKE_ID_SELECT_TRACK:
+        {
+            DPD_MSG_HIGH("Calling INVOKE_ID_SELECT_TRACK to invoke");
+            ret = setParameter(methodId,request);
+            break;
+        }
+
+        case INVOKE_ID_UNSELECT_TRACK:
+        {
+            DPD_MSG_HIGH("Calling INVOKE_ID_UNSELECT_TRACK to invoke");
+            ret = setParameter(methodId,request);
+            break;
+        }
+
+        case INVOKE_ID_GET_SELECTED_TRACK:
+        {
+            DPD_MSG_HIGH("Calling INVOKE_ID_GET_SELECTED_TRACK to invoke");
+            int32_t type = request.readInt32();
+            ret =  mPlayer->getSelectedTrack(type, reply);
+            break;
+        }
 
        default:
        {

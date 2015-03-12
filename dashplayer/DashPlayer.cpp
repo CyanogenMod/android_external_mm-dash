@@ -162,6 +162,11 @@ DashPlayer::~DashPlayer() {
     if (mTextDecoder != NULL) {
       looper()->unregisterHandler(mTextDecoder->id());
     }
+    if (mCCDecoder != NULL)
+    {
+      mCCDecoder = NULL;
+      DP_MSG_ERROR("mCCDecoder deleted");
+    }
     if(mStats != NULL) {
         mStats->logFpsSummary();
         mStats = NULL;
@@ -868,7 +873,6 @@ void DashPlayer::onMessageReceived(const sp<AMessage> &msg) {
 
             DP_MSG_ERROR("kWhatSeek seekTimeUs=%lld us (%.2f secs)",
                  seekTimeUs, (double)seekTimeUs / 1E6);
-
             nRet = mSource->seekTo(seekTimeUs);
 
             if (nRet == OK) { // if seek success then flush the audio,video decoder and renderer
@@ -1215,11 +1219,60 @@ void DashPlayer::onMessageReceived(const sp<AMessage> &msg) {
                }
            break;
            }
+           case kWhatClosedCaptionNotify:
+           {
+             onClosedCaptionNotify(msg);
+             break;
+           }
 
         default:
             TRESPASS();
             break;
     }
+}
+
+void DashPlayer::onClosedCaptionNotify(const sp<AMessage> &msg) {
+  int32_t what;
+  CHECK(msg->findInt32("what", &what));
+  switch (what)
+  {
+    case DashPlayer::CCDecoder::kWhatClosedCaptionData:
+    {
+      sp<ABuffer> buffer;
+      CHECK(msg->findBuffer("buffer", &buffer));
+      size_t inbandTracks = 0;
+      if (mSource != NULL)
+      {
+        inbandTracks = mSource->getTrackCount();
+      }
+      sendSubtitleData(buffer, inbandTracks);
+      break;
+    }
+    case DashPlayer::CCDecoder::kWhatTrackAdded:
+    {
+      notifyListener(MEDIA_INFO, MEDIA_INFO_METADATA_UPDATE, 0);
+      break;
+    }
+    default:
+      TRESPASS();
+  }
+}
+
+void DashPlayer::sendSubtitleData(const sp<ABuffer> &buffer, int32_t baseIndex)
+{
+  int32_t trackIndex;
+  int64_t timeUs, durationUs;
+  CHECK(buffer->meta()->findInt32("trackIndex", &trackIndex));
+  CHECK(buffer->meta()->findInt64("timeUs", &timeUs));
+  CHECK(buffer->meta()->findInt64("durationUs", &durationUs));
+  Parcel in;
+  in.writeInt32(trackIndex + baseIndex);
+  in.writeInt64(timeUs);
+  in.writeInt64(durationUs);
+  in.writeInt32(buffer->size());
+  in.writeInt32(buffer->size());
+  in.write(buffer->data(), buffer->size());
+  notifyListener(MEDIA_SUBTITLE_DATA, 0, 0, &in);
 }
 
 void DashPlayer::finishFlushIfPossible() {
@@ -1422,6 +1475,23 @@ status_t DashPlayer::instantiateDecoder(int track, sp<Decoder> *decoder) {
         notify = new AMessage(kWhatVideoNotify ,id());
         *decoder = new Decoder(notify, mNativeWindow);
         DP_MSG_HIGH("Creating Video Decoder ");
+        sp<AMessage> ccNotify = new AMessage(kWhatClosedCaptionNotify, id());
+        if (mCCDecoder == NULL)
+        {
+          mCCDecoder = new CCDecoder(ccNotify);
+          if (mCCDecoder != NULL)
+          {
+            DP_MSG_MEDIUM("CCDecoder Create:Success");
+          }
+          else
+          {
+            DP_MSG_ERROR("CCDecoder Create:Fail");
+          }
+        }
+        else
+        {
+           DP_MSG_HIGH("CCDecoder:Exists");
+        }
         if (mRenderer != NULL) {
             mRenderer->setMediaPresence(false,true);
         }
@@ -1632,6 +1702,8 @@ void DashPlayer::renderBuffer(bool audio, const sp<AMessage> &msg) {
 
     sp<ABuffer> buffer;
     CHECK(msg->findBuffer("buffer", &buffer));
+    int64_t mediaTimeUs;
+    CHECK(buffer->meta()->findInt64("timeUs", &mediaTimeUs));
 
     int64_t &skipUntilMediaTimeUs =
         audio
@@ -1639,9 +1711,6 @@ void DashPlayer::renderBuffer(bool audio, const sp<AMessage> &msg) {
             : mSkipRenderingVideoUntilMediaTimeUs;
 
     if (skipUntilMediaTimeUs >= 0) {
-        int64_t mediaTimeUs;
-        CHECK(buffer->meta()->findInt64("timeUs", &mediaTimeUs));
-
         if (mediaTimeUs < skipUntilMediaTimeUs) {
             DP_MSG_HIGH("dropping %s buffer at time %lld as requested.",
                  audio ? "audio" : "video",
@@ -1719,117 +1788,126 @@ void DashPlayer::renderBuffer(bool audio, const sp<AMessage> &msg) {
                       OMX_QCOM_EXTRADATA_USERDATA *userdata = (OMX_QCOM_EXTRADATA_USERDATA *)pExtra->data;
                       OMX_U8 *data_ptr = (OMX_U8 *)userdata->data;
                       OMX_U32 userdata_size = pExtra->nDataSize - (OMX_U32)sizeof(userdata->type);
-
-                      DP_MSG_LOW(
+                      if (mCCDecoder != NULL)
+                      {
+                          DP_MSG_HIGH("mCCDecoder->decode %lld",mediaTimeUs);
+                          mCCDecoder->decode(data_ptr, userdata_size, mediaTimeUs);
+                      }
+                      else
+                      {
+                        DP_MSG_LOW(
                         "--------------  OMX_ExtraDataMP2UserData Userdata  -------------\n"
                         "    Stream userdata type: %lu\n"
                         "           userdata size: %lu\n"
                         "         STREAM_USERDATA:",
                         userdata->type, userdata_size);
 
-                      for (uint32_t i = 0; i < userdata_size; i+=4) {
-                        DP_MSG_LOW("        %x %x %x %x",
-                          data_ptr[i], data_ptr[i+1],
-                          data_ptr[i+2], data_ptr[i+3]);
-                      }
-
-                      DP_MSG_LOW(
-                        "-------------- End of OMX_ExtraDataMP2UserData Userdata -----------");
-
-                      /*
-                      SEI Syntax
-
-                      user_data_registered_itu_t_t35 ( ) {
-                      itu_t_t35_country_code (8 bits)
-                      itu_t_t35_provider_code (16 bits)
-                      user_identifier (32 bits)
-                      user_structure( )
-                      }
-
-                      cc_data parsing logic
-                      1. itu_t_t35_country_code - A fixed 8-bit field, the value of which shall be 0xB5.3
-                      itu_t_35_provider_code - A fixed 16-bit field, the value of which shall be 0x0031.
-                      2. user_identifier should match 0x47413934 ('GA94') ATSC_user_data( )
-
-                      ATSC_user_data Syntax
-                      ATSC_user_data() {
-                      user_data_type_code (8 bits)
-                      user_data_type_structure()
-                      }
-
-                      3. user_data_type_code should match 0x03 MPEG_cc_data()
-
-                      */
-
-                      if(0xB5 == data_ptr[0] && 0x00 == data_ptr[1] && 0x31 == data_ptr[2]
-                      && 0x47 == data_ptr[3] && 0x41 == data_ptr[4] && 0x39 == data_ptr[5] && 0x34 == data_ptr[6]
-                      && 0x03 == data_ptr[7])
-                      {
-                        DP_MSG_HIGH("SEI payload user_data_type_code is CEA encoded MPEG_cc_data()");
-
-                        OMX_U32 cc_data_size = 0;
-                        for(int i = 8; data_ptr[i] != 0xFF /*each cc_data ends with marker bits*/; i++)
-                        {
-                          cc_data_size++;
+                        for (uint32_t i = 0; i < userdata_size; i+=4) {
+                          DP_MSG_LOW("        %x %x %x %x",
+                            data_ptr[i], data_ptr[i+1],
+                            data_ptr[i+2], data_ptr[i+3]);
                         }
 
-                        if(cc_data_size > 0)
+                        DP_MSG_LOW(
+                          "-------------- End of OMX_ExtraDataMP2UserData Userdata -----------");
+
+                        /*
+                          SEI Syntax
+
+                          user_data_registered_itu_t_t35 ( ) {
+                          itu_t_t35_country_code (8 bits)
+                          itu_t_t35_provider_code (16 bits)
+                          user_identifier (32 bits)
+                          user_structure( )
+                          }
+
+                          cc_data parsing logic
+                          1. itu_t_t35_country_code - A fixed 8-bit field, the value of which shall be 0xB5.3
+                          itu_t_35_provider_code - A fixed 16-bit field, the value of which shall be 0x0031.
+                          2. user_identifier should match 0x47413934 ('GA94') ATSC_user_data( )
+
+                          ATSC_user_data Syntax
+                          ATSC_user_data() {
+                          user_data_type_code (8 bits)
+                          user_data_type_structure()
+                          }
+
+                          3. user_data_type_code should match 0x03 MPEG_cc_data()
+
+                        */
+
+                        if(0xB5 == data_ptr[0] && 0x00 == data_ptr[1] && 0x31 == data_ptr[2]
+                        && 0x47 == data_ptr[3] && 0x41 == data_ptr[4] && 0x39 == data_ptr[5] && 0x34 == data_ptr[6]
+                        && 0x03 == data_ptr[7])
                         {
-                          DP_MSG_LOW(
-                            "--------------  MPEG_cc_data()  -------------\n"
-                            "    cc_data ptr: %p cc_data_size: %lu\n",
-                            &data_ptr[8], cc_data_size);
+                          DP_MSG_HIGH("SEI payload user_data_type_code is CEA encoded MPEG_cc_data()");
 
-                          for (uint32_t i = 8; i < 8 + cc_data_size; i+=4) {
-                            DP_MSG_LOW("        %x %x %x %x",
-                              data_ptr[i], data_ptr[i+1],
-                              data_ptr[i+2], data_ptr[i+3]);
-                          }
-
-                          DP_MSG_LOW(
-                            "--------------  End of MPEG_cc_data()  -------------\n");
-
-                          sp<ABuffer> accessUnit = new ABuffer((OMX_U8*)&data_ptr[8], cc_data_size);
-
-                          int64_t mediaTimeUs;
-
-                          sp<ABuffer> buffer;
-                          CHECK(msg->findBuffer("buffer", &buffer));
-                          CHECK(buffer->meta()->findInt64("timeUs", &mediaTimeUs));
-                          accessUnit->meta()->setInt64("timeUs",mediaTimeUs);
-
-                          //To signal discontinuity in samples during seek and resume-out-of-tsb(internal seek) operations
-                          if(mTimedTextCEASamplesDisc)
+                          OMX_U32 cc_data_size = 0;
+                          for(int i = 8; data_ptr[i] != 0xFF /*each cc_data ends with marker bits*/; i++)
                           {
-                            accessUnit->meta()->setInt32("disc", 1);
-                            mTimedTextCEASamplesDisc = false;
+                            cc_data_size++;
                           }
 
-                          //Indicate timedtext CEA present in stream. Used to signal EOS in Codec::kWhatEOS
-                          if(!mTimedTextCEAPresent)
+                          if(cc_data_size > 0)
                           {
-                            mTimedTextCEAPresent = true;
+                            DP_MSG_LOW(
+                              "--------------  MPEG_cc_data()  -------------\n"
+                              "    cc_data ptr: %p cc_data_size: %lu\n",
+                              &data_ptr[8], cc_data_size);
+
+                            for (uint32_t i = 8; i < 8 + cc_data_size; i+=4) {
+                              DP_MSG_LOW("        %x %x %x %x",
+                                data_ptr[i], data_ptr[i+1],
+                                data_ptr[i+2], data_ptr[i+3]);
+                            }
+
+                            DP_MSG_LOW(
+                              "--------------  End of MPEG_cc_data()  -------------\n");
+
+                            sp<ABuffer> accessUnit = new ABuffer((OMX_U8*)&data_ptr[8], cc_data_size);
+
+                            int64_t mediaTimeUs;
+
+                            sp<ABuffer> buffer;
+                            CHECK(msg->findBuffer("buffer", &buffer));
+                            CHECK(buffer->meta()->findInt64("timeUs", &mediaTimeUs));
+                            accessUnit->meta()->setInt64("timeUs",mediaTimeUs);
+
+                            //To signal discontinuity in samples during seek and resume-out-of-tsb(internal seek) operations
+                            if(mTimedTextCEASamplesDisc)
+                            {
+                              accessUnit->meta()->setInt32("disc", 1);
+                              mTimedTextCEASamplesDisc = false;
+                            }
+
+                            //Indicate timedtext CEA present in stream. Used to signal EOS in Codec::kWhatEOS
+                            if(!mTimedTextCEAPresent)
+                            {
+                              mTimedTextCEAPresent = true;
+                            }
+
+                            sendTextPacket(accessUnit, OK, TIMED_TEXT_CEA);
+
+                            accessUnit = NULL;
+                            break;
                           }
-
-                          sendTextPacket(accessUnit, OK, TIMED_TEXT_CEA);
-
-                          accessUnit = NULL;
-                          break;
                         }
                       }
                     }
-
                     pExtra = (OMX_OTHER_EXTRADATATYPE *) (((OMX_U8 *) pExtra) + pExtra->nSize);
                   }
-
                   graphicBuffer->unlock();
                 }
               }
             }
           }
         }
+        if ( mCCDecoder != NULL && mCCDecoder->isSelected())
+        {
+          DP_MSG_HIGH("Calling CCDecoder->display for TS %lld", mediaTimeUs);
+          mCCDecoder->display(mediaTimeUs);
+        }
       }
-
       mRenderer->queueBuffer(audio, buffer, reply);
     }
 }
@@ -1883,6 +1961,10 @@ void DashPlayer::flushDecoder(bool audio, bool needShutdown) {
                 || mFlushingVideo == AWAITING_DISCONTINUITY);
 
         mFlushingVideo = newStatus;
+
+        if (mCCDecoder != NULL) {
+            mCCDecoder->flush();
+        }
 
         if (mFlushingAudio == NONE) {
             mFlushingAudio = (mAudioDecoder != NULL)
@@ -1978,7 +2060,22 @@ status_t DashPlayer::getParameter(int key, Parcel *reply)
     }
     else if(key == INVOKE_ID_GET_TRACK_INFO)
     {
+      size_t numInbandTracks = (mSource != NULL) ? mSource->getTrackCount() : 0;
+      size_t numCCTracks  = (mCCDecoder != NULL) ? mCCDecoder->getTrackCount() : 0;
+      // total track count
+      reply->writeInt32(numInbandTracks + numCCTracks);
+      // write inband tracks
       err = mSource->getTrackInfo(reply);
+      DP_MSG_HIGH("DashPlayer::getParameter # ccTracks %d", numCCTracks);
+      if (err == OK &&
+          numCCTracks > 0 &&
+          mCCDecoder != NULL)
+      {
+        for (size_t i = 0; i < numCCTracks; ++i)
+        {
+          writeTrackInfo(reply, mCCDecoder->getTrackInfo(i));
+        }
+      }
     }
     else
     {
@@ -2045,6 +2142,86 @@ status_t DashPlayer::getParameter(int key, Parcel *reply)
     return err;
 }
 
+void DashPlayer::writeTrackInfo(
+  Parcel* reply, const sp<AMessage> format) const
+{
+  int32_t trackType;
+  CHECK(format->findInt32("type", &trackType));
+  AString lang;
+  CHECK(format->findString("language", &lang));
+  reply->writeInt32(2); // write something non-zero
+  reply->writeInt32(trackType);
+  reply->writeString16(String16(lang.c_str()));
+
+ if (trackType == MEDIA_TRACK_TYPE_SUBTITLE)
+ {
+   AString mime;
+   CHECK(format->findString("mime", &mime));
+
+   int32_t isAuto, isDefault, isForced;
+   CHECK(format->findInt32("auto", &isAuto));
+   CHECK(format->findInt32("default", &isDefault));
+   CHECK(format->findInt32("forced", &isForced));
+
+   reply->writeString16(String16(mime.c_str()));
+   reply->writeInt32(isAuto);
+   reply->writeInt32(isDefault);
+   reply->writeInt32(isForced);
+  }
+}
+
+status_t DashPlayer::selectTrack(size_t trackIndex, bool select)
+{
+  status_t err = OK;
+  size_t numInbandTracks = (mSource != NULL) ? mSource->getTrackCount() : 0;
+  size_t numCCTracks  = (mCCDecoder != NULL) ? mCCDecoder->getTrackCount() : 0;
+  DP_MSG_HIGH("DashPlayer::selectTrack inbandTracks %d, ccTracks %d, trackIndex %d select %d",
+                numInbandTracks, numCCTracks, trackIndex, select);
+
+  if (trackIndex < numInbandTracks)
+  {
+    //Audio/video track selection not supported
+    DP_MSG_ERROR("Audio/video track selection not supported");
+    err = INVALID_OPERATION;
+  }
+  else
+  {
+    trackIndex -= numInbandTracks;
+    if (trackIndex < numCCTracks)
+    {
+      err = (mCCDecoder != NULL)? mCCDecoder->selectTrack(trackIndex, select) : OK;
+    }
+  }
+  return err;
+}
+
+
+status_t DashPlayer::getSelectedTrack(int32_t type, Parcel* reply)
+{
+  status_t err = OK;
+  int32_t trackType;
+  ssize_t selectedTrackIndex = -1;
+  size_t numInbandTracks = (mSource != NULL) ? mSource->getTrackCount() : 0;
+  size_t numCCTracks  = (mCCDecoder != NULL) ? mCCDecoder->getTrackCount() : 0;
+  if (type == MEDIA_TRACK_TYPE_SUBTITLE)
+  {
+    selectedTrackIndex = (mCCDecoder != NULL) ? mCCDecoder->getSelectedTrack() : -1;
+    if (selectedTrackIndex >= 0 && selectedTrackIndex < (ssize_t)numCCTracks)
+    {
+      selectedTrackIndex = numInbandTracks + selectedTrackIndex;
+    }
+  }
+  else
+  {
+    err = BAD_VALUE;
+  }
+  DP_MSG_HIGH("DashPlayer::getSelectedTrack tracktype %d and SelectedTrackIndex %d",type,selectedTrackIndex);
+  reply->writeInt32(selectedTrackIndex);
+  return err;
+}
+
+
+
 status_t DashPlayer::setParameter(int key, const Parcel &request)
 {
     status_t err = (status_t)UNKNOWN_ERROR;;
@@ -2073,6 +2250,16 @@ status_t DashPlayer::setParameter(int key, const Parcel &request)
       {
         err = mSource->setParameter(key, &value, sizeof(value));
       }
+    }
+    else if (key == INVOKE_ID_SELECT_TRACK)
+    {
+      int trackIndex = request.readInt32();
+      err = selectTrack(trackIndex, true /* select */);
+    }
+    else if (key == INVOKE_ID_UNSELECT_TRACK)
+    {
+      int trackIndex = request.readInt32();
+      err = selectTrack(trackIndex, false /* select */);
     }
     return err;
 }

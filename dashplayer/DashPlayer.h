@@ -92,6 +92,7 @@ struct DashPlayer : public AHandler {
     status_t dump(int fd, const Vector<String16> &args);
     status_t pushBlankBuffersToNativeWindow();
 
+    status_t getSelectedTrack(int32_t type, Parcel* reply);
 public:
     struct DASHHTTPLiveSource;
 
@@ -102,6 +103,7 @@ protected:
 
 private:
     struct Decoder;
+    struct CCDecoder;
     struct Renderer;
     struct Source;
     struct Action;
@@ -153,6 +155,7 @@ private:
         kWhatScanSources                = 'scan',
         kWhatVideoNotify                = 'vidN',
         kWhatAudioNotify                = 'audN',
+        kWhatClosedCaptionNotify        = 'capN',
         kWhatTextNotify                 = 'texN',
         kWhatRendererNotify             = 'renN',
         kWhatReset                      = 'rset',
@@ -180,7 +183,7 @@ private:
     sp<Decoder> mAudioDecoder;
     sp<Decoder> mTextDecoder;
     sp<Renderer> mRenderer;
-
+    sp<CCDecoder> mCCDecoder;
     List<sp<Action> > mDeferredActions;
 
     bool mAudioEOS;
@@ -260,6 +263,8 @@ private:
 
     void flushDecoder(bool audio, bool needShutdown);
 
+    status_t selectTrack(size_t trackIndex, bool select);
+
     static bool IsFlushingState(FlushStatus state, bool *needShutdown = NULL);
 
     void finishReset();
@@ -288,6 +293,10 @@ private:
 
     //Set and reset in cases of seek/resume-out-of-tsb to signal discontinuity in CEA timedtextsamples
     bool mTimedTextCEASamplesDisc;
+
+    void onClosedCaptionNotify(const sp<AMessage> &msg);
+    void sendSubtitleData(const sp<ABuffer> &buffer, int32_t baseIndex);
+    void writeTrackInfo(Parcel* reply, const sp<AMessage> format) const;
 
     int32_t mCurrentWidth;
     int32_t mCurrentHeight;
