@@ -49,12 +49,16 @@ DashPlayer::Renderer::Renderer(
       mHasAudio(false),
       mHasVideo(false),
       mSyncQueues(false),
+      mIsFirstVideoframeReceived(false),
+      mPendingPostAudioDrains(false),
+      mPendingPostVideoDrains(false),
       mPaused(false),
       mWasPaused(false),
       mLastPositionUpdateUs(-1ll),
       mVideoLateByUs(0ll),
       mStats(NULL),
-      mLogLevel(0) {
+      mLogLevel(0),
+      mLastReceivedVideoSampleUs(-1) {
 
       mAVSyncDelayWindowUs = 40000;
 
@@ -137,8 +141,10 @@ void DashPlayer::Renderer::signalTimeDiscontinuity() {
     mSyncQueues = mHasAudio && mHasVideo;
     mIsFirstVideoframeReceived = false;
     mPendingPostAudioDrains = false;
+    mPendingPostVideoDrains = false;
     mHasAudio = false;
     mHasVideo = false;
+    mLastReceivedVideoSampleUs = -1;
     DPR_MSG_HIGH("signalTimeDiscontinuity mHasAudio %d mHasVideo %d mSyncQueues %d",mHasAudio,mHasVideo,mSyncQueues);
 }
 
@@ -179,6 +185,10 @@ void DashPlayer::Renderer::onMessageReceived(const sp<AMessage> &msg) {
                 // Let's give it more data after about half that time
                 // has elapsed.
                 postDrainAudioQueue(delayUs / 2);
+            }
+            if (mPendingPostVideoDrains) {
+                mPendingPostVideoDrains = false;
+                postDrainVideoQueue();
             }
             break;
         }
@@ -304,6 +314,31 @@ bool DashPlayer::Renderer::onDrainAudioQueue() {
             int64_t mediaTimeUs;
             CHECK(entry->mBuffer->meta()->findInt64("timeUs", &mediaTimeUs));
 
+            // This is needed since we opened up AAL to not hold one track
+            // if other track is in buffering for live use case. Primary use
+            // case here is video plays thru when audio is in 404s (ex: 404s
+            // from a_5.3gp to a_8.3gp) When audio path runs dry due to 404,
+            // a couple of decoded audio samples from old segment (a_4.3gp)
+            // are still held by decoder and released only when new samples
+            // are fed after 404 period. If these old audio samples are rendered
+            // here they will reset the anchor media and anchor real time to
+            // current time. This results in video (which would have been
+            // draining the last few samples from v_8.3gp) to look at anchor
+            // time set by old audio samples and postDrainVideoQueue calls a
+            // post with delay. This would cause a freeze in video when audio
+            // resumes after 404s. Hence to avoid late samples from setting the
+            // anchor times drop audio if corr. video samples were already
+            // received for rendering.
+
+            if (mediaTimeUs < mLastReceivedVideoSampleUs) {
+                DPR_MSG_ERROR("dropping late by audio. media time %.2f secs < last received video media time %.2f secs",
+                      (double)mediaTimeUs/1E6, (double)mLastReceivedVideoSampleUs/1E6);
+                entry->mNotifyConsumed->post();
+                mAudioQueue.erase(mAudioQueue.begin());
+                entry = NULL;
+                continue;
+            }
+
             DPR_MSG_HIGH("rendering audio at media time %.2f secs", (double)mediaTimeUs / 1E6);
 
             mAnchorTimeMediaUs = mediaTimeUs;
@@ -351,7 +386,7 @@ bool DashPlayer::Renderer::onDrainAudioQueue() {
 }
 
 void DashPlayer::Renderer::postDrainVideoQueue() {
-    if (mDrainVideoQueuePending || mSyncQueues || mPaused) {
+    if (mDrainVideoQueuePending || mSyncQueues || mPaused || mPendingPostVideoDrains) {
         return;
     }
 
@@ -379,19 +414,49 @@ void DashPlayer::Renderer::postDrainVideoQueue() {
             if (!mHasAudio) {
                 mAnchorTimeMediaUs = mediaTimeUs;
                 mAnchorTimeRealUs = ALooper::GetNowUs();
+            } else if (!mAudioQueue.empty()) {
+                // This is at beginning of rendering when both A V are
+                // present. Wait for first A sample to be rendered and
+                // then start rendering V samples. Handles playback start
+                // with V 404s use case where first A TS < V TS.
+                // In such case this is needed since if we allow V to
+                // go thru here mLastReceivedVideoSampleUs > A samples TS
+                // and the audio samples will be dropped
+                if (!mPendingPostVideoDrains) {
+                    mPendingPostVideoDrains = true;
+                }
+                return;
             }
         } else {
-            if ( (!mHasAudio && mHasVideo) && (mWasPaused == true))
-            {
-               mAnchorTimeMediaUs = mediaTimeUs;
-               mAnchorTimeRealUs = ALooper::GetNowUs();
-               mWasPaused = false;
+            if (mWasPaused) {
+                mWasPaused = false;
+                if (!mHasAudio) {
+                    mAnchorTimeMediaUs = mediaTimeUs;
+                    mAnchorTimeRealUs = ALooper::GetNowUs();
+                } else if (!mAudioQueue.empty()) {
+                    // This is for a pause-resume when both A V are present
+                    // and we are in V only 404s phase within TSB. This check
+                    // waits for first A sample to be rendered and then start
+                    // rendering V samples. Needed as after resume first
+                    // V TS > A TS since V's were 404s. In such case if we allow
+                    // V to go thru here, onDrainVideoQueue will update
+                    // mLastReceivedVideoSampleUs.
+                    // Then mLastReceivedVideoSampleUs > A TS and the following
+                    // audio samples will be dropped.
+                    if (!mPendingPostVideoDrains) {
+                        mPendingPostVideoDrains = true;
+                    }
+                    return;
+                }
             }
 
             int64_t realTimeUs =
                 (mediaTimeUs - mAnchorTimeMediaUs) + mAnchorTimeRealUs;
 
             delayUs = realTimeUs - ALooper::GetNowUs();
+            if (delayUs > 0) {
+                DPR_MSG_ERROR("postDrainVideoQueue video early by %.2f secs", (double)delayUs / 1E6);
+            }
         }
     }
 
@@ -424,6 +489,7 @@ void DashPlayer::Renderer::onDrainVideoQueue() {
 
     int64_t mediaTimeUs;
     CHECK(entry->mBuffer->meta()->findInt64("timeUs", &mediaTimeUs));
+    mLastReceivedVideoSampleUs = mediaTimeUs;
 
     int64_t realTimeUs = mediaTimeUs - mAnchorTimeMediaUs + mAnchorTimeRealUs;
     int64_t nowUs = ALooper::GetNowUs();
@@ -431,7 +497,7 @@ void DashPlayer::Renderer::onDrainVideoQueue() {
 
     bool tooLate = (mVideoLateByUs > mAVSyncDelayWindowUs);
 
-    if (tooLate && !mHasAudio)
+    if (tooLate && (!mHasAudio || (mediaTimeUs > mAnchorTimeMediaUs)))
     {
         DPR_MSG_HIGH("video only - resetting anchortime");
         mAnchorTimeMediaUs = mediaTimeUs;
@@ -502,7 +568,7 @@ void DashPlayer::Renderer::onQueueBuffer(const sp<AMessage> &msg) {
         (buffer->meta())->findInt64("timeUs", &audioTimeUs);
         if ((mHasVideo && mIsFirstVideoframeReceived)
             || !mHasVideo){
-        postDrainAudioQueue();
+            postDrainAudioQueue();
             return;
         }
         else

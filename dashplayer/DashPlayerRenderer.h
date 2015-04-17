@@ -102,6 +102,7 @@ private:
 
     bool mIsFirstVideoframeReceived;
     bool mPendingPostAudioDrains;
+    bool mPendingPostVideoDrains;
 
     bool mPaused;
     bool mWasPaused; // if paused then store the info
@@ -139,6 +140,8 @@ private:
   private:
     sp<DashPlayerStats> mStats;
     int mLogLevel;
+
+    int64_t mLastReceivedVideoSampleUs;
 
     DISALLOW_EVIL_CONSTRUCTORS(Renderer);
 };
