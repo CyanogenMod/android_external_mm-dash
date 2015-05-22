@@ -589,11 +589,13 @@ void DashPlayer::onMessageReceived(const sp<AMessage> &msg) {
                 bool needShutdown = false;
 
                 if (track == kAudio) {
-                    CHECK(IsFlushingState(mFlushingAudio, &needShutdown));
-                    mFlushingAudio = FLUSHED;
+                    if(IsFlushingState(mFlushingAudio, &needShutdown)) {
+                        mFlushingAudio = FLUSHED;
+                    }
                 } else if (track == kVideo){
-                    CHECK(IsFlushingState(mFlushingVideo, &needShutdown));
-                    mFlushingVideo = FLUSHED;
+                    if(IsFlushingState(mFlushingVideo, &needShutdown)) {
+                        mFlushingVideo = FLUSHED;
+                    }
 
                     mVideoLateByUs = 0;
                 }
