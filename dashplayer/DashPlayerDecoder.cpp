@@ -92,12 +92,11 @@ void DashPlayer::Decoder::onConfigure(const sp<AMessage> &format) {
     sp<Surface> surface = NULL;
     if (mNativeWindow != NULL) {
         surface = mNativeWindow->getSurfaceTextureClient();
-    }
-
-    if (surface.get() == NULL) {
-        DPD_MSG_ERROR("Failed to create surface");
-        handleError(UNKNOWN_ERROR);
-        return;
+        if (surface.get() == NULL) {
+            DPD_MSG_ERROR("Failed to create surface");
+            handleError(UNKNOWN_ERROR);
+            return;
+        }
     }
 
     mComponentName = mime;
