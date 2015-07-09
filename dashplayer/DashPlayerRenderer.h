@@ -88,11 +88,15 @@ private:
 
     bool mDrainAudioQueuePending;
     bool mDrainVideoQueuePending;
+    bool mDrainVideoQueuePendingUntilFirstAudio;
     int32_t mAudioQueueGeneration;
     int32_t mVideoQueueGeneration;
 
     int64_t mAnchorTimeMediaUs;
     int64_t mAnchorTimeRealUs;
+
+    int64_t mStartAnchorTimeMediaUs;
+    int64_t mStartAnchorTimeRealUs;
 
     int64_t mSeekTimeUs;
 
@@ -103,10 +107,6 @@ private:
     bool mHasAudio;
     bool mHasVideo;
     bool mSyncQueues;
-
-    int mNumVideoframesReceived;
-    bool mPendingPostAudioDrains;
-    bool mPendingPostVideoDrains;
 
     bool mPaused;
     bool mWasPaused; // if paused then store the info
@@ -152,6 +152,8 @@ private:
     bool mDelayPending;
     int64_t mDelayToQueueUs;
     int64_t mDelayToQueueTimeRealUs;
+
+    int64_t mPausedTimeRealUs;
 
     DISALLOW_EVIL_CONSTRUCTORS(Renderer);
 };
