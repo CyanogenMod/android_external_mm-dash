@@ -39,19 +39,19 @@ DashPlayer::Renderer::Renderer(
       mNumFramesWritten(0),
       mDrainAudioQueuePending(false),
       mDrainVideoQueuePending(false),
+      mDrainVideoQueuePendingUntilFirstAudio(false),
       mAudioQueueGeneration(0),
       mVideoQueueGeneration(0),
       mAnchorTimeMediaUs(-1),
       mAnchorTimeRealUs(-1),
+      mStartAnchorTimeMediaUs(-1),
+      mStartAnchorTimeRealUs(-1),
       mSeekTimeUs(0),
       mFlushingAudio(false),
       mFlushingVideo(false),
       mHasAudio(false),
       mHasVideo(false),
       mSyncQueues(false),
-      mNumVideoframesReceived(0),
-      mPendingPostAudioDrains(true),
-      mPendingPostVideoDrains(false),
       mPaused(false),
       mWasPaused(false),
       mLastPositionUpdateUs(-1ll),
@@ -61,7 +61,8 @@ DashPlayer::Renderer::Renderer(
       mLastReceivedVideoSampleUs(-1),
       mDelayPending(false),
       mDelayToQueueUs(0),
-      mDelayToQueueTimeRealUs(0) {
+      mDelayToQueueTimeRealUs(0),
+      mPausedTimeRealUs(-1) {
 
       mAVSyncDelayWindowUs = 40000;
 
@@ -162,15 +163,17 @@ void DashPlayer::Renderer::signalTimeDiscontinuity() {
     CHECK(mVideoQueue.empty());
     mAnchorTimeMediaUs = -1;
     mAnchorTimeRealUs = -1;
+    mStartAnchorTimeMediaUs = -1;
+    mStartAnchorTimeRealUs = -1;
     mWasPaused = false;
     mSeekTimeUs = 0;
     mSyncQueues = mHasAudio && mHasVideo;
-    mNumVideoframesReceived = 0;
-    mPendingPostAudioDrains = true;
-    mPendingPostVideoDrains = false;
     mHasAudio = false;
     mHasVideo = false;
     mLastReceivedVideoSampleUs = -1;
+    /*mPlaybackStartedForAV = false;*/
+    mDrainVideoQueuePendingUntilFirstAudio = false;
+    mPausedTimeRealUs = -1;
     DPR_MSG_HIGH("signalTimeDiscontinuity mHasAudio %d mHasVideo %d mSyncQueues %d",mHasAudio,mHasVideo,mSyncQueues);
 }
 
@@ -194,7 +197,14 @@ void DashPlayer::Renderer::onMessageReceived(const sp<AMessage> &msg) {
 
             mDrainAudioQueuePending = false;
 
-            if (onDrainAudioQueue()) {
+            bool postAudio = onDrainAudioQueue();
+
+            if (mDrainVideoQueuePendingUntilFirstAudio) {
+                mDrainVideoQueuePendingUntilFirstAudio = false;
+                postDrainVideoQueue();
+            }
+
+            if (postAudio) {
                 uint32_t numFramesPlayed;
                 CHECK_EQ(mAudioSink->getPosition(&numFramesPlayed),
                          (status_t)OK);
@@ -212,10 +222,7 @@ void DashPlayer::Renderer::onMessageReceived(const sp<AMessage> &msg) {
                 // has elapsed.
                 postDrainAudioQueue(delayUs / 2);
             }
-            if (mPendingPostVideoDrains) {
-                mPendingPostVideoDrains = false;
-                postDrainVideoQueue();
-            }
+
             break;
         }
 
@@ -383,29 +390,56 @@ bool DashPlayer::Renderer::onDrainAudioQueue() {
             int64_t mediaTimeUs;
             CHECK(entry->mBuffer->meta()->findInt64("timeUs", &mediaTimeUs));
 
-            // This is needed since we opened up AAL to not hold one track
-            // if other track is in buffering for live use case. Primary use
-            // case here is video plays thru when audio is in 404s (ex: 404s
-            // from a_5.3gp to a_8.3gp) When audio path runs dry due to 404,
-            // a couple of decoded audio samples from old segment (a_4.3gp)
-            // are still held by decoder and released only when new samples
-            // are fed after 404 period. If these old audio samples are rendered
-            // here they will reset the anchor media and anchor real time to
-            // current time. This results in video (which would have been
-            // draining the last few samples from v_8.3gp) to look at anchor
-            // time set by old audio samples and postDrainVideoQueue calls a
-            // post with delay. This would cause a freeze in video when audio
-            // resumes after 404s. Hence to avoid late samples from setting the
-            // anchor times drop audio if corr. video samples were already
-            // received for rendering.
+            if (mHasVideo) {
+                if (mStartAnchorTimeRealUs < 0) {
+                    // This is first audio sample at start (or) after seek (or)
+                    // after pause-resume. If audio mediaTimeUs does not match
+                    // mStartAnchorTimeMediaUs it means video mediaTimeUs
+                    // matches. Return on audio so that video will set
+                    // mStartAnchorTimeRealUs
+                    if (mStartAnchorTimeMediaUs != mediaTimeUs) {
+                        return true;
+                    }
+                }
 
-            if (mediaTimeUs < mLastReceivedVideoSampleUs) {
-                DPR_MSG_ERROR("dropping late by audio. media time %.2f secs < last received video media time %.2f secs",
+                if (mediaTimeUs < mLastReceivedVideoSampleUs) {
+                    DPR_MSG_ERROR("dropping late by audio. media time %.2f secs < last received video media time %.2f secs",
                       (double)mediaTimeUs/1E6, (double)mLastReceivedVideoSampleUs/1E6);
-                entry->mNotifyConsumed->post();
-                mAudioQueue.erase(mAudioQueue.begin());
-                entry = NULL;
-                continue;
+                    entry->mNotifyConsumed->post();
+                    mAudioQueue.erase(mAudioQueue.begin());
+                    entry = NULL;
+                    continue;
+                }
+
+                int32_t disc;
+                if (entry->mBuffer->meta()->findInt32("disc", &disc) && disc == 1) {
+                    int64_t realTimeUs =
+                    (mediaTimeUs - mStartAnchorTimeMediaUs) + mStartAnchorTimeRealUs;
+                    int64_t delayUs = realTimeUs - ALooper::GetNowUs();
+                    // To account for the audio sink latency
+                    delayUs -= (mAudioSink->latency()*1000/2);
+
+                    if (delayUs > 0) {
+                        ALOGE("onDrainAudioQueue realTimeUs=%.3f mStartAnchorTimeRealUs=%.3f mediaTimeUs=%.3f mStartAnchorTimeMediaUs=%.3f sinkLatency=%.3f delayUs=%.3f",
+                           (double)ALooper::GetNowUs()/1E6,
+                           (double)mStartAnchorTimeRealUs/1E6,
+                           (double)mediaTimeUs/1E6,
+                           (double)mStartAnchorTimeMediaUs/1E6,
+                           (double)mAudioSink->latency(),
+                           (double)delayUs/1E6);
+
+                           entry->mBuffer->meta()->setInt32("disc", 0);
+                           sp<AMessage> msg = new AMessage(kWhatDrainAudioQueue, id());
+                           msg->setInt32("generation", mAudioQueueGeneration);
+                           msg->post(delayUs);
+                           mDrainAudioQueuePending = true;
+
+                           mAnchorTimeMediaUs = mediaTimeUs;
+                           mAnchorTimeRealUs = ALooper::GetNowUs() + delayUs + (mAudioSink->latency()*1000/2);
+
+                           return false;
+                    }
+                }
             }
 
             DPR_MSG_HIGH("rendering audio at media time %.2f secs", (double)mediaTimeUs / 1E6);
@@ -425,6 +459,10 @@ bool DashPlayer::Renderer::onDrainAudioQueue() {
 
             mAnchorTimeRealUs =
                 ALooper::GetNowUs() + realTimeOffsetUs;
+
+            if (mHasVideo && mStartAnchorTimeRealUs < 0) {
+                mStartAnchorTimeRealUs = mAnchorTimeRealUs;
+            }
         }
 
         size_t copy = entry->mBuffer->size() - entry->mOffset;
@@ -455,7 +493,7 @@ bool DashPlayer::Renderer::onDrainAudioQueue() {
 }
 
 void DashPlayer::Renderer::postDrainVideoQueue() {
-    if (mDelayPending || mDrainVideoQueuePending || mSyncQueues || mPaused || mPendingPostVideoDrains) {
+    if (mDelayPending || mDrainVideoQueuePending || mSyncQueues || mPaused || mDrainVideoQueuePendingUntilFirstAudio) {
         return;
     }
 
@@ -479,23 +517,8 @@ void DashPlayer::Renderer::postDrainVideoQueue() {
 
         if (mAnchorTimeMediaUs < 0) {
             delayUs = 0;
-
-            if (!mHasAudio) {
                 mAnchorTimeMediaUs = mediaTimeUs;
                 mAnchorTimeRealUs = ALooper::GetNowUs();
-            } else if (!mAudioQueue.empty()) {
-                // This is at beginning of rendering when both A V are
-                // present. Wait for first A sample to be rendered and
-                // then start rendering V samples. Handles playback start
-                // with V 404s use case where first A TS < V TS.
-                // In such case this is needed since if we allow V to
-                // go thru here mLastReceivedVideoSampleUs > A samples TS
-                // and the audio samples will be dropped
-                if (!mPendingPostVideoDrains) {
-                    mPendingPostVideoDrains = true;
-                }
-                return;
-            }
         } else {
             if (mWasPaused) {
                 mWasPaused = false;
@@ -512,8 +535,8 @@ void DashPlayer::Renderer::postDrainVideoQueue() {
                     // mLastReceivedVideoSampleUs.
                     // Then mLastReceivedVideoSampleUs > A TS and the following
                     // audio samples will be dropped.
-                    if (!mPendingPostVideoDrains) {
-                        mPendingPostVideoDrains = true;
+                    if (!mDrainVideoQueuePendingUntilFirstAudio) {
+                        mDrainVideoQueuePendingUntilFirstAudio = true;
                     }
                     return;
                 }
@@ -570,7 +593,7 @@ void DashPlayer::Renderer::onDrainVideoQueue() {
 
     bool tooLate = (mVideoLateByUs > mAVSyncDelayWindowUs);
 
-    if (tooLate && (!mHasAudio || (mediaTimeUs > mAnchorTimeMediaUs)))
+    if (tooLate && (!mHasAudio || (mediaTimeUs > mAnchorTimeMediaUs) || mStartAnchorTimeRealUs < 0))
     {
         DPR_MSG_HIGH("video only - resetting anchortime");
         mAnchorTimeMediaUs = mediaTimeUs;
@@ -586,6 +609,11 @@ void DashPlayer::Renderer::onDrainVideoQueue() {
         }
     } else {
         DPR_MSG_HIGH("rendering video at media time %.2f secs", (double)mediaTimeUs / 1E6);
+
+        if (mHasAudio && mStartAnchorTimeRealUs < 0) {
+            mStartAnchorTimeRealUs = ALooper::GetNowUs();
+        }
+
         if(mStats != NULL) {
             mStats->recordOnTime(realTimeUs,nowUs,mVideoLateByUs);
             mStats->incrementTotalRenderingFrames();
@@ -638,36 +666,76 @@ void DashPlayer::Renderer::onQueueBuffer(const sp<AMessage> &msg) {
     if (audio) {
         mAudioQueue.push_back(entry);
 
-        if ((mHasVideo && !mPendingPostAudioDrains) || !mHasVideo) {
-            postDrainAudioQueue();
+        if (mHasVideo && mStartAnchorTimeMediaUs < 0) {
+
+        int64_t mediaTimeUs;
+        (buffer->meta())->findInt64("timeUs", &mediaTimeUs);
+
+        /*if (!mPlaybackStartedForAV) {*/
+        // This is first A buffer at start (or after seek). Set disc flag.
+        // disc flag is used later to delay A if A TS > V TS at start of playback.
+
+        if (mVideoQueue.size() < 2) {
+            DPR_MSG_HIGH("Not rendering audio Sample with TS: %lld  until first two video frames are received", mediaTimeUs);
             return;
-        } else {
-            int64_t audioTimeUs;
-            (buffer->meta())->findInt64("timeUs", &audioTimeUs);
-            DPR_MSG_HIGH("Not rendering audio Sample with TS: %lld  until first two video frames are decoded", audioTimeUs);
         }
+
+        int64_t firstVideoTimeUs;
+        sp<ABuffer> firstVideoBuffer = (*mVideoQueue.begin()).mBuffer;
+        CHECK(firstVideoBuffer->meta()->findInt64("timeUs", &firstVideoTimeUs));
+
+        mStartAnchorTimeMediaUs = (mediaTimeUs <= firstVideoTimeUs) ? mediaTimeUs : firstVideoTimeUs;
+
+        DPR_MSG_HIGH("AUDIO: Both audio and video received. mediaTimeUs=%lld firstVideoTimeUs=%lld mStartAnchorTimeMediaUs=%lld",
+                mediaTimeUs, firstVideoTimeUs, mStartAnchorTimeMediaUs);
+
+        /*mPlaybackStartedForAV = true;*/
+        mDrainVideoQueuePendingUntilFirstAudio = true;
+        postDrainAudioQueue();
+        return;
+   } /*else {
+       mStartAnchorTimeMediaUs = mediaTimeUs;
+   }*/
+
+        postDrainAudioQueue();
+        return;
+
     } else {
         mVideoQueue.push_back(entry);
 
-        if (mNumVideoframesReceived < 2) {
-            int64_t videoTimeUs;
-            (buffer->meta())->findInt64("timeUs", &videoTimeUs);
+        if (mHasAudio && mStartAnchorTimeMediaUs < 0) {
+            int64_t mediaTimeUs;
+            (buffer->meta())->findInt64("timeUs", &mediaTimeUs);
 
-            if (mNumVideoframesReceived == 0) {
-                DPR_MSG_HIGH("Received first video Sample with TS: %lld", videoTimeUs);
-                mNumVideoframesReceived++;
+            /*if (!mPlaybackStartedForAV) {*/
+            if (mAudioQueue.size() == 0) {
+                DPR_MSG_HIGH("Not rendering video Sample with TS: %lld  until first audio sample is received", mediaTimeUs);
                 return;
-            } else if (mNumVideoframesReceived == 1) {
-                DPR_MSG_HIGH("Received second video Sample with TS: %lld", videoTimeUs);
-                mNumVideoframesReceived++;
             }
-        }
 
-        if (mPendingPostAudioDrains) {
-            mPendingPostAudioDrains = false;
+            if (mVideoQueue.size() < 2) {
+                DPR_MSG_HIGH("Not rendering video Sample with TS: %lld  until first two video frames are received", mediaTimeUs);
+                return;
+            }
+
+            int64_t firstAudioTimeUs;
+            sp<ABuffer> firstAudioBuffer = (*mAudioQueue.begin()).mBuffer;
+            CHECK(firstAudioBuffer->meta()->findInt64("timeUs", &firstAudioTimeUs));
+
+            mStartAnchorTimeMediaUs = (mediaTimeUs <= firstAudioTimeUs) ? mediaTimeUs : firstAudioTimeUs;
+
+            DPR_MSG_HIGH("VIDEO: Both audio and video received. mediaTimeUs=%lld firstAudioTimeUs=%lld mStartAnchorTimeMediaUs=%lld",
+                mediaTimeUs, firstAudioTimeUs, mStartAnchorTimeMediaUs);
+
+            /*mPlaybackStartedForAV = true;*/
+            mDrainVideoQueuePendingUntilFirstAudio = true;
             postDrainAudioQueue();
-        }
-        postDrainVideoQueue();
+            return;
+        } /*else {
+        mStartAnchorTimeMediaUs = mediaTimeUs;
+    }*/
+
+    postDrainVideoQueue();
     }
 
     if (!mSyncQueues || mAudioQueue.empty() || mVideoQueue.empty()) {
@@ -892,17 +960,21 @@ void DashPlayer::Renderer::onPause() {
     mPaused = true;
     mWasPaused = true;
 
+    mPausedTimeRealUs = ALooper::GetNowUs();
+
     if(mStats != NULL) {
         int64_t positionUs;
         if(mAnchorTimeRealUs < 0 || mAnchorTimeMediaUs < 0) {
             positionUs = -1000;
         } else {
-            int64_t nowUs = ALooper::GetNowUs();
-            positionUs = (nowUs - mAnchorTimeRealUs) + mAnchorTimeMediaUs;
+            positionUs = (mPausedTimeRealUs - mAnchorTimeRealUs) + mAnchorTimeMediaUs;
         }
 
         mStats->logPause(positionUs);
     }
+
+	/*mStartAnchorTimeRealUs = -1;
+	mStartAnchorTimeMediaUs = -1;*/
 }
 
 void DashPlayer::Renderer::onResume() {
@@ -916,6 +988,10 @@ void DashPlayer::Renderer::onResume() {
 
     mPaused = false;
 
+    if (mPausedTimeRealUs > 0 && mStartAnchorTimeRealUs > 0) {
+        mStartAnchorTimeRealUs += (ALooper::GetNowUs() - mPausedTimeRealUs);
+    }
+
     if (!mAudioQueue.empty()) {
         postDrainAudioQueue();
     }
@@ -923,6 +999,35 @@ void DashPlayer::Renderer::onResume() {
     if (!mVideoQueue.empty()) {
         postDrainVideoQueue();
     }
+
+	/*  int64_t audioTimeUs = -1;
+	  int64_t videoTimeUs = -1;
+
+    if (!mAudioQueue.empty()) {
+        sp<ABuffer> audioBuffer = (*mAudioQueue.begin()).mBuffer;
+        CHECK(audioBuffer->meta()->findInt64("timeUs", &audioTimeUs));
+    }
+
+    if (!mVideoQueue.empty()) {
+        sp<ABuffer> videoBuffer = (*mVideoQueue.begin()).mBuffer;
+        CHECK(videoBuffer->meta()->findInt64("timeUs", &videoTimeUs));
+    }
+
+	  if (audioTimeUs > 0 && videoTimeUs > 0) {
+		    mStartAnchorTimeMediaUs = (audioTimeUs < videoTimeUs) ? audioTimeUs : videoTimeUs;
+        mDrainVideoQueuePendingUntilFirstAudio = true;
+		    postDrainAudioQueue();
+	  } else if (audioTimeUs > 0) {
+        if (mHasVideo) {
+		        mStartAnchorTimeMediaUs = audioTimeUs;
+        }
+		    postDrainAudioQueue();
+	  } else if (videoTimeUs > 0) {
+        if (mHasAudio) {
+		        mStartAnchorTimeMediaUs = videoTimeUs;
+        }
+		    postDrainVideoQueue();
+	  }*/
 }
 
 void DashPlayer::Renderer::registerStats(sp<DashPlayerStats> stats) {
