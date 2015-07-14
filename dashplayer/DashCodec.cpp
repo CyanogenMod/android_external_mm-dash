@@ -612,9 +612,8 @@ OMX_U32 *bufferCount, OMX_U32 *bufferSize,
     }
 
     *minUndequeuedBuffers = 0;
-    err = mNativeWindow->query(
-            mNativeWindow.get(), NATIVE_WINDOW_MIN_UNDEQUEUED_BUFFERS,
-            (int *)minUndequeuedBuffers);
+    err = mNativeWindow->query( NATIVE_WINDOW_MIN_UNDEQUEUED_BUFFERS,
+            &minUndequeuedBuffers);
 
     if (err != 0) {
         DC_MSG_ERROR("NATIVE_WINDOW_MIN_UNDEQUEUED_BUFFERS query failed: %s (%d)",
