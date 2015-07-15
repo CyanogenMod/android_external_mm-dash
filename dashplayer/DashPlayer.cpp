@@ -1784,17 +1784,39 @@ void DashPlayer::renderBuffer(bool audio, const sp<AMessage> &msg) {
             sp<GraphicBuffer> graphicBuffer = static_cast<GraphicBuffer*>(obj.get());
             if (graphicBuffer != NULL)
             {
-              DP_MSG_LOW("kwhatdrainthisbuffer: Extradata present",
-                  "graphicBuffer = %p, width=%d height=%d color-format=%d",
+              size_t filledLen = 0, allocLen = 0;
+              DP_MSG_LOW("kwhatdrainthisbuffer: Extradata present graphicBuffer = %p, width=%d height=%d color-format=%d",
                   graphicBuffer.get(), mCurrentWidth, mCurrentHeight, mColorFormat);
 
               if (mColorFormat == 0x7FA30C04 /*OMX_QCOM_COLOR_FormatYUV420PackedSemiPlanar32m*/)
               {
-                size_t filledLen = (VENUS_Y_STRIDE(COLOR_FMT_NV12, mCurrentWidth)
+                filledLen = (VENUS_Y_STRIDE(COLOR_FMT_NV12, mCurrentWidth)
                                     * VENUS_Y_SCANLINES(COLOR_FMT_NV12, mCurrentHeight))
                                           +  (VENUS_UV_STRIDE(COLOR_FMT_NV12, mCurrentWidth)
                                               * VENUS_UV_SCANLINES(COLOR_FMT_NV12, mCurrentHeight));
-                size_t allocLen = VENUS_BUFFER_SIZE(COLOR_FMT_NV12, mCurrentWidth, mCurrentHeight);
+                allocLen = VENUS_BUFFER_SIZE(COLOR_FMT_NV12, mCurrentWidth, mCurrentHeight);
+              }
+              else if (mColorFormat == 0x7FA30C06 /*QOMX_COLOR_FORMATYUV420PackedSemiPlanar32mCompressed*/)
+              {
+                unsigned int y_stride = VENUS_Y_STRIDE(COLOR_FMT_NV12_UBWC, mCurrentWidth);
+                unsigned int uv_stride = VENUS_UV_STRIDE(COLOR_FMT_NV12_UBWC, mCurrentWidth);
+                unsigned int y_sclines = VENUS_Y_SCANLINES(COLOR_FMT_NV12_UBWC, mCurrentHeight);
+                unsigned int uv_sclines = VENUS_UV_SCANLINES(COLOR_FMT_NV12_UBWC, mCurrentHeight);
+                unsigned int y_ubwc_plane = MSM_MEDIA_ALIGN(y_stride * y_sclines, 4096);
+                unsigned int uv_ubwc_plane = MSM_MEDIA_ALIGN(uv_stride * uv_sclines, 4096);
+                unsigned int y_meta_stride = VENUS_Y_META_STRIDE(COLOR_FMT_NV12_UBWC, mCurrentWidth);
+                unsigned int y_meta_scanlines = VENUS_Y_META_SCANLINES(COLOR_FMT_NV12_UBWC, mCurrentHeight);
+                unsigned int y_meta_plane = MSM_MEDIA_ALIGN(y_meta_stride * y_meta_scanlines, 4096);
+                unsigned int uv_meta_stride = VENUS_UV_META_STRIDE(COLOR_FMT_NV12_UBWC, mCurrentWidth);
+                unsigned int uv_meta_scanlines = VENUS_UV_META_SCANLINES(COLOR_FMT_NV12_UBWC, mCurrentHeight);
+                unsigned int uv_meta_plane = MSM_MEDIA_ALIGN(uv_meta_stride * uv_meta_scanlines, 4096);
+
+                filledLen = y_ubwc_plane + uv_ubwc_plane + y_meta_plane + uv_meta_plane;
+                allocLen = VENUS_BUFFER_SIZE(COLOR_FMT_NV12_UBWC, mCurrentWidth, mCurrentHeight);
+              }
+
+              if (filledLen > 0 && allocLen > 0)
+              {
                 size_t offset = buffer->offset();
 
                 DP_MSG_LOW("kwhatdrainthisbuffer: decoded buffer ranges "
@@ -1832,14 +1854,8 @@ void DashPlayer::renderBuffer(bool audio, const sp<AMessage> &msg) {
                       OMX_QCOM_EXTRADATA_USERDATA *userdata = (OMX_QCOM_EXTRADATA_USERDATA *)pExtra->data;
                       OMX_U8 *data_ptr = (OMX_U8 *)userdata->data;
                       OMX_U32 userdata_size = pExtra->nDataSize - (OMX_U32)sizeof(userdata->type);
-                      if (mCCDecoder != NULL)
-                      {
-                          DP_MSG_HIGH("mCCDecoder->decode %lld",mediaTimeUs);
-                          mCCDecoder->decode(data_ptr, userdata_size, mediaTimeUs);
-                      }
-                      else
-                      {
-                        DP_MSG_LOW(
+
+                      DP_MSG_LOW(
                         "--------------  OMX_ExtraDataMP2UserData Userdata  -------------\n"
                         "    Stream userdata type: %lu\n"
                         "           userdata size: %lu\n"
@@ -1852,9 +1868,16 @@ void DashPlayer::renderBuffer(bool audio, const sp<AMessage> &msg) {
                             data_ptr[i+2], data_ptr[i+3]);
                         }
 
-                        DP_MSG_LOW(
-                          "-------------- End of OMX_ExtraDataMP2UserData Userdata -----------");
+                      DP_MSG_LOW(
+                        "-------------- End of OMX_ExtraDataMP2UserData Userdata -----------");
 
+                      if (mCCDecoder != NULL)
+                      {
+                          DP_MSG_HIGH("mCCDecoder->decode %lld",mediaTimeUs);
+                          mCCDecoder->decode(data_ptr, userdata_size, mediaTimeUs);
+                      }
+                      else
+                      {
                         /*
                           SEI Syntax
 
