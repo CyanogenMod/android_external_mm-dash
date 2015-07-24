@@ -193,6 +193,7 @@ void DashPlayer::Decoder::configure(const sp<MetaData> &meta) {
  */
 void DashPlayer::Decoder::handleError(int32_t err)
 {
+    DPD_MSG_HIGH("[%s] handleError : %d", mComponentName.c_str() , err);
     sp<AMessage> notify = mNotify->dup();
     notify->setInt32("what", kWhatError);
     notify->setInt32("err", err);
