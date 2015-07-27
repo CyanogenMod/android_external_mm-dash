@@ -44,6 +44,7 @@ public:
                             const KeyedVector<String8, String8> *headers);
     virtual status_t        pause();
     virtual status_t        seekTo(int msec);
+    virtual void            notify(int msg, int ext1, int ext2, const Parcel *obj);
 
 private:
     bool mDashPlayback;
