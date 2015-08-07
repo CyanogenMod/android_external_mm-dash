@@ -27,7 +27,7 @@
  */
 
 //#define LOG_NDEBUG 0
-#define LOG_TAG "QCMediaPlayer"
+#define LOG_TAG "NativeQCMediaPlayer"
 
 #include "qcmediaplayer.h"
 
@@ -45,6 +45,28 @@ QCMediaPlayer::QCMediaPlayer() {
 QCMediaPlayer::~QCMediaPlayer() {
     ALOGV("destructor");
 }
+
+void QCMediaPlayer::notify(int msg, int ext1, int ext2, const Parcel *obj)
+{
+    ALOGV("message received msg=%d, ext1=%d, ext2=%d", msg, ext1, ext2);
+    bool locked = false;
+    if (mLockThreadId != getThreadId()) {
+        mLock.lock();
+        locked = true;
+    }
+
+    // Allows calls from JNI in idle state to notify errors
+    if (!((msg == MEDIA_ERROR || msg == MEDIA_QOE) && mCurrentState == MEDIA_PLAYER_IDLE) && mPlayer == 0) {
+        ALOGV("notify(%d, %d, %d) callback on disconnected mediaplayer", msg, ext1, ext2);
+        if (locked) mLock.unlock();   // release the lock when done.
+        return;
+    }
+
+    if (locked) mLock.unlock();
+    MediaPlayer::notify(msg, ext1, ext2, obj);
+}
+
+
 
 status_t QCMediaPlayer::setDataSource(
         const sp<IMediaHTTPService> &httpService,
