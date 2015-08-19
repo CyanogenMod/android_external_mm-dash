@@ -33,8 +33,7 @@ class DashPlayerFactory : public MediaPlayerFactory::IFactory {
                                float /*curScore*/) {
         if (!strncasecmp("http://", url, 7)) {
             size_t len = strlen(url);
-            if ((len >= 5 && !strcasecmp(".mpd", &url[len - 4]))
-                    || strstr(url,"mpd")) {
+            if (len >= 5 && !strcasecmp(".mpd", &url[len - 4])) {
                 ALOGI("Using DashPlayer for .mpd");
                 return 1.0;
             }
@@ -48,7 +47,7 @@ class DashPlayerFactory : public MediaPlayerFactory::IFactory {
         return 0.0;
     }
 
-    virtual sp<MediaPlayerBase> createPlayer() {
+    virtual sp<MediaPlayerBase> createPlayer(pid_t /*pid*/) {
         return new DashPlayerDriver;
     }
 };

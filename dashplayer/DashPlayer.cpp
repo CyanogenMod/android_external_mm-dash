@@ -60,7 +60,7 @@ private:
 };
 
 struct DashPlayer::SetSurfaceAction : public Action {
-    SetSurfaceAction(const sp<NativeWindowWrapper> &wrapper)
+    SetSurfaceAction(const sp<Surface> &wrapper)
         : mWrapper(wrapper) {
     }
 
@@ -69,7 +69,7 @@ struct DashPlayer::SetSurfaceAction : public Action {
     }
 
 private:
-    sp<NativeWindowWrapper> mWrapper;
+    sp<Surface> mWrapper;
 
     DISALLOW_EVIL_CONSTRUCTORS(SetSurfaceAction);
 };
@@ -203,7 +203,7 @@ void DashPlayer::setDataSource(const sp<IStreamSource> &/*source*/) {
 
 status_t DashPlayer::setDataSource(
         const char *url, const KeyedVector<String8, String8> *headers) {
-    sp<AMessage> msg = new AMessage(kWhatSetDataSource, id());
+    sp<AMessage> msg = new AMessage(kWhatSetDataSource, this);
 
     sp<Source> source;
     if (!strncasecmp(url, "http://", 7) &&
@@ -232,46 +232,44 @@ void DashPlayer::setDataSource(int /*fd*/, int64_t /*offset*/, int64_t /*length*
 }
 
 void DashPlayer::setVideoSurfaceTexture(const sp<IGraphicBufferProducer> &bufferProducer) {
-    sp<AMessage> msg = new AMessage(kWhatSetVideoNativeWindow, id());
+    sp<AMessage> msg = new AMessage(kWhatSetVideoNativeWindow, this);
 
     if (bufferProducer == NULL) {
-        msg->setObject("native-window", NULL);
+        msg->setObject("surface", NULL);
         DP_MSG_ERROR("DashPlayer::setVideoSurfaceTexture bufferproducer = NULL ");
     } else {
         DP_MSG_ERROR("DashPlayer::setVideoSurfaceTexture bufferproducer = %p", bufferProducer.get());
         msg->setObject(
-                "native-window",
-                new NativeWindowWrapper(
-                    new Surface(bufferProducer)));
+                "surface", new Surface(bufferProducer,  true /* controlledByApp */));
     }
 
     msg->post();
 }
 
 void DashPlayer::setAudioSink(const sp<MediaPlayerBase::AudioSink> &sink) {
-    sp<AMessage> msg = new AMessage(kWhatSetAudioSink, id());
+    sp<AMessage> msg = new AMessage(kWhatSetAudioSink, this);
     msg->setObject("sink", sink);
     msg->post();
 }
 
 void DashPlayer::start() {
-    (new AMessage(kWhatStart, id()))->post();
+    (new AMessage(kWhatStart, this))->post();
 }
 
 void DashPlayer::pause() {
-    (new AMessage(kWhatPause, id()))->post();
+    (new AMessage(kWhatPause, this))->post();
 }
 
 void DashPlayer::resume() {
-    (new AMessage(kWhatResume, id()))->post();
+    (new AMessage(kWhatResume, this))->post();
 }
 
 void DashPlayer::resetAsync() {
-    (new AMessage(kWhatReset, id()))->post();
+    (new AMessage(kWhatReset, this))->post();
 }
 
 void DashPlayer::seekToAsync(int64_t seekTimeUs) {
-    sp<AMessage> msg = new AMessage(kWhatSeek, id());
+    sp<AMessage> msg = new AMessage(kWhatSeek, this);
     msg->setInt64("seekTimeUs", seekTimeUs);
     msg->post();
 }
@@ -339,9 +337,9 @@ void DashPlayer::onMessageReceived(const sp<AMessage> &msg) {
             if(mNativeWindow == NULL)
             {
               sp<RefBase> obj;
-              CHECK(msg->findObject("native-window", &obj));
+              CHECK(msg->findObject("surface", &obj));
 
-              mNativeWindow = static_cast<NativeWindowWrapper *>(obj.get());
+              mNativeWindow = static_cast<Surface *>(obj.get());
               DP_MSG_HIGH("kWhatSetVideoNativeWindow valid nativewindow  %p", mNativeWindow.get());
               if (mDriver != NULL) {
               sp<DashPlayerDriver> driver = mDriver.promote();
@@ -361,8 +359,9 @@ void DashPlayer::onMessageReceived(const sp<AMessage> &msg) {
             */
 
             sp<RefBase> obj;
-            CHECK(msg->findObject("native-window", &obj));
+            CHECK(msg->findObject("surface", &obj));
 
+            sp<Surface> surface = static_cast<Surface *>(obj.get());
 
             /* eMBMS switch to audio only channel use case events sequence
              * 1. On a channel switch app creates mediaplayer, calls setDisplay()
@@ -388,8 +387,7 @@ void DashPlayer::onMessageReceived(const sp<AMessage> &msg) {
 
             DP_MSG_HIGH("kWhatSetVideoNativeWindow old %p", mNativeWindow.get());
             DP_MSG_HIGH("kWhatSetVideoNativeWindow new %p", obj.get());
-            mDeferredActions.push_back(
-            new SetSurfaceAction(static_cast<NativeWindowWrapper *>(obj.get())));
+            mDeferredActions.push_back( new SetSurfaceAction(surface));
 
             if (obj.get() != NULL) {
             // If there is a new surface texture, instantiate decoders
@@ -431,7 +429,7 @@ void DashPlayer::onMessageReceived(const sp<AMessage> &msg) {
 
             mRenderer = new Renderer(
                     mAudioSink,
-                    new AMessage(kWhatRendererNotify, id()));
+                    new AMessage(kWhatRendererNotify, this));
             // for qualcomm statistics profiling
             mStats = new DashPlayerStats();
             mRenderer->registerStats(mStats);
@@ -1359,7 +1357,7 @@ void DashPlayer::finishFlushIfPossible() {
         mResetInProgress = false;
         finishReset();
     } else if (mResetPostponed) {
-        (new AMessage(kWhatReset, id()))->post();
+        (new AMessage(kWhatReset, this))->post();
         mResetPostponed = false;
         DP_MSG_LOW("Handle reset postpone");
     }else if(isSetSurfaceTexturePending){
@@ -1439,7 +1437,7 @@ void DashPlayer::postScanSources() {
         return;
     }
 
-    sp<AMessage> msg = new AMessage(kWhatScanSources, id());
+    sp<AMessage> msg = new AMessage(kWhatScanSources, this);
     msg->setInt32("generation", mScanSourcesGeneration);
     msg->post();
 
@@ -1484,7 +1482,7 @@ status_t DashPlayer::instantiateDecoder(int track, sp<Decoder> *decoder) {
 
     sp<AMessage> notify;
     if (track == kAudio) {
-        notify = new AMessage(kWhatAudioNotify ,id());
+        notify = new AMessage(kWhatAudioNotify ,this);
         DP_MSG_HIGH("Creating Audio Decoder ");
         *decoder = new Decoder(notify);
         DP_MSG_LOW("@@@@:: setting Sink/Renderer pointer to decoder");
@@ -1495,10 +1493,10 @@ status_t DashPlayer::instantiateDecoder(int track, sp<Decoder> *decoder) {
         mLastReadAudioMediaTimeUs = -1;
 
     } else if (track == kVideo) {
-        notify = new AMessage(kWhatVideoNotify ,id());
+        notify = new AMessage(kWhatVideoNotify ,this);
         *decoder = new Decoder(notify, mNativeWindow);
         DP_MSG_HIGH("Creating Video Decoder ");
-        sp<AMessage> ccNotify = new AMessage(kWhatClosedCaptionNotify, id());
+        sp<AMessage> ccNotify = new AMessage(kWhatClosedCaptionNotify, this);
         if (mCCDecoder == NULL)
         {
           mCCDecoder = new CCDecoder(ccNotify);
@@ -1524,7 +1522,7 @@ status_t DashPlayer::instantiateDecoder(int track, sp<Decoder> *decoder) {
         mDelayRenderingUs = 0;
 
     } else if (track == kText) {
-        mTextNotify = new AMessage(kWhatTextNotify ,id());
+        mTextNotify = new AMessage(kWhatTextNotify ,this);
         *decoder = new Decoder(mTextNotify);
         sp<AMessage> codecRequest = new AMessage;
         codecRequest->setInt32("what", Decoder::kWhatFillThisBuffer);
@@ -2139,7 +2137,7 @@ sp<DashPlayer::Source>
 
 status_t DashPlayer::prepareAsync() // only for DASH
 {
-    sp<AMessage> msg = new AMessage(kWhatPrepareAsync, id());
+    sp<AMessage> msg = new AMessage(kWhatPrepareAsync, this);
     if (msg == NULL)
     {
         DP_MSG_ERROR("Out of memory, AMessage is null for kWhatPrepareAsync\n");
@@ -2391,7 +2389,7 @@ status_t DashPlayer::setParameter(int key, const Parcel &request)
 
 void DashPlayer::postIsPrepareDone()
 {
-    sp<AMessage> msg = new AMessage(kWhatIsPrepareDone, id());
+    sp<AMessage> msg = new AMessage(kWhatIsPrepareDone, this);
     if (msg == NULL)
     {
         DP_MSG_ERROR("Out of memory, AMessage is null for kWhatIsPrepareDone\n");
@@ -2549,8 +2547,8 @@ void DashPlayer::getTrackName(int track, char* name)
 
 void DashPlayer::prepareSource()
 {
-    mSourceNotify = new AMessage(kWhatSourceNotify ,id());
-    mQOENotify = new AMessage(kWhatQOE,id());
+    mSourceNotify = new AMessage(kWhatSourceNotify ,this);
+    mQOENotify = new AMessage(kWhatQOE,this);
     if (mSource != NULL)
     {
       mSource->setupSourceData(mSourceNotify,kTrackAll);
@@ -2603,7 +2601,7 @@ void DashPlayer::processDeferredActions() {
     }
 }
 
-void DashPlayer::performSetSurface(const sp<NativeWindowWrapper> &wrapper) {
+void DashPlayer::performSetSurface(const sp<Surface> &wrapper) {
     DP_MSG_HIGH("performSetSurface");
 
     mNativeWindow = wrapper;
@@ -2672,7 +2670,7 @@ status_t DashPlayer::pushBlankBuffersToNativeWindow() {
         return ((status_t)UNKNOWN_ERROR);
     }
 
-    sp<ANativeWindow> nativeWindow = mNativeWindow->getNativeWindow();
+    ANativeWindow *nativeWindow = mNativeWindow.get();
     status_t err = NO_ERROR;
     ANativeWindowBuffer* anb = NULL;
     int numBufs = 0;
@@ -2681,7 +2679,7 @@ status_t DashPlayer::pushBlankBuffersToNativeWindow() {
     // We need to reconnect to the ANativeWindow as a CPU client to ensure that
     // no frames get dropped by SurfaceFlinger assuming that these are video
     // frames.
-    err = native_window_api_disconnect(nativeWindow.get(),
+    err = native_window_api_disconnect(nativeWindow,
             NATIVE_WINDOW_API_MEDIA);
     if (err != NO_ERROR) {
         ALOGE("error pushing blank frames: api_disconnect failed: %s (%d)",
@@ -2689,7 +2687,7 @@ status_t DashPlayer::pushBlankBuffersToNativeWindow() {
         return err;
     }
 
-    err = native_window_api_connect(nativeWindow.get(),
+    err = native_window_api_connect(nativeWindow,
             NATIVE_WINDOW_API_CPU);
     if (err != NO_ERROR) {
         ALOGE("error pushing blank frames: api_connect failed: %s (%d)",
@@ -2697,7 +2695,7 @@ status_t DashPlayer::pushBlankBuffersToNativeWindow() {
         return err;
     }
 
-    err = native_window_set_buffers_dimensions(nativeWindow.get(),
+    err = native_window_set_buffers_dimensions(nativeWindow,
             1, 1);
     if (err != NO_ERROR) {
         ALOGE("error pushing blank frames: set_buffers_dimensions failed: %s (%d)",
@@ -2705,7 +2703,7 @@ status_t DashPlayer::pushBlankBuffersToNativeWindow() {
         goto error;
     }
 
-    err = native_window_set_buffers_format(nativeWindow.get(),
+    err = native_window_set_buffers_format(nativeWindow,
             HAL_PIXEL_FORMAT_RGBX_8888);
     if (err != NO_ERROR) {
         ALOGE("error pushing blank frames: set_buffers_format failed: %s (%d)",
@@ -2713,7 +2711,7 @@ status_t DashPlayer::pushBlankBuffersToNativeWindow() {
         goto error;
     }
 
-    err = native_window_set_scaling_mode(nativeWindow.get(),
+    err = native_window_set_scaling_mode(nativeWindow,
                 NATIVE_WINDOW_SCALING_MODE_SCALE_TO_WINDOW);
     if (err != NO_ERROR) {
         ALOGE("error pushing blank_frames: set_scaling_mode failed: %s (%d)",
@@ -2721,7 +2719,7 @@ status_t DashPlayer::pushBlankBuffersToNativeWindow() {
         goto error;
     }
 
-    err = native_window_set_usage(nativeWindow.get(),
+    err = native_window_set_usage(nativeWindow,
             GRALLOC_USAGE_SW_WRITE_OFTEN);
     if (err != NO_ERROR) {
         ALOGE("error pushing blank frames: set_usage failed: %s (%d)",
@@ -2729,7 +2727,7 @@ status_t DashPlayer::pushBlankBuffersToNativeWindow() {
         goto error;
     }
 
-    err = nativeWindow->query(nativeWindow.get(),
+    err = nativeWindow->query(nativeWindow,
             NATIVE_WINDOW_MIN_UNDEQUEUED_BUFFERS, &minUndequeuedBufs);
     if (err != NO_ERROR) {
         ALOGE("error pushing blank frames: MIN_UNDEQUEUED_BUFFERS query "
@@ -2738,7 +2736,7 @@ status_t DashPlayer::pushBlankBuffersToNativeWindow() {
     }
 
     numBufs = minUndequeuedBufs + 1;
-    err = native_window_set_buffer_count(nativeWindow.get(), numBufs);
+    err = native_window_set_buffer_count(nativeWindow, numBufs);
     if (err != NO_ERROR) {
         ALOGE("error pushing blank frames: set_buffer_count failed: %s (%d)",
                 strerror(-err), -err);
@@ -2751,7 +2749,7 @@ status_t DashPlayer::pushBlankBuffersToNativeWindow() {
     // guaranteed NOT to be currently displayed.
     for (int i = 0; i < numBufs + 1; i++) {
         int fenceFd = -1;
-        err = native_window_dequeue_buffer_and_wait(nativeWindow.get(), &anb);
+        err = native_window_dequeue_buffer_and_wait(nativeWindow, &anb);
         if (err != NO_ERROR) {
             ALOGE("error pushing blank frames: dequeueBuffer failed: %s (%d)",
                     strerror(-err), -err);
@@ -2778,7 +2776,7 @@ status_t DashPlayer::pushBlankBuffersToNativeWindow() {
             goto error;
         }
 
-        err = nativeWindow->queueBuffer(nativeWindow.get(),
+        err = nativeWindow->queueBuffer(nativeWindow,
                 buf->getNativeBuffer(), -1);
         if (err != NO_ERROR) {
             ALOGE("error pushing blank frames: queueBuffer failed: %s (%d)",
@@ -2794,18 +2792,18 @@ error:
     if (err != NO_ERROR) {
         // Clean up after an error.
         if (anb != NULL) {
-            nativeWindow->cancelBuffer(nativeWindow.get(), anb, -1);
+            nativeWindow->cancelBuffer(nativeWindow, anb, -1);
         }
 
-        native_window_api_disconnect(nativeWindow.get(),
+        native_window_api_disconnect(nativeWindow,
                 NATIVE_WINDOW_API_CPU);
-        native_window_api_connect(nativeWindow.get(),
+        native_window_api_connect(nativeWindow,
                 NATIVE_WINDOW_API_MEDIA);
 
         return err;
     } else {
         // Clean up after success.
-        err = native_window_api_disconnect(nativeWindow.get(),
+        err = native_window_api_disconnect(nativeWindow,
                 NATIVE_WINDOW_API_CPU);
         if (err != NO_ERROR) {
             ALOGE("error pushing blank frames: api_disconnect failed: %s (%d)",
@@ -2813,7 +2811,7 @@ error:
             return err;
         }
 
-        err = native_window_api_connect(nativeWindow.get(),
+        err = native_window_api_connect(nativeWindow,
                 NATIVE_WINDOW_API_MEDIA);
         if (err != NO_ERROR) {
             ALOGE("error pushing blank frames: api_connect failed: %s (%d)",
