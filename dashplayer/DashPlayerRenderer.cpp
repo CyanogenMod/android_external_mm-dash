@@ -408,7 +408,7 @@ bool DashPlayer::Renderer::onDrainAudioQueue() {
                 continue;
             }
 
-            DPR_MSG_HIGH("rendering audio at media time %.2f secs", (double)mediaTimeUs / 1E6);
+            DPR_MSG_ERROR("rendering audio at media time %.2f secs", (double)mediaTimeUs / 1E6);
 
             mAnchorTimeMediaUs = mediaTimeUs;
 
@@ -425,6 +425,9 @@ bool DashPlayer::Renderer::onDrainAudioQueue() {
 
             mAnchorTimeRealUs =
                 ALooper::GetNowUs() + realTimeOffsetUs;
+
+            DPR_MSG_HIGH("onDrainAudioQueue mediaTimeUs %lld us mAnchorTimeMediaUs %lld us mAnchorTimeRealUs %lld us",
+             mediaTimeUs, mAnchorTimeMediaUs, mAnchorTimeRealUs);
         }
 
         size_t copy = entry->mBuffer->size() - entry->mOffset;
@@ -524,7 +527,7 @@ void DashPlayer::Renderer::postDrainVideoQueue() {
 
             delayUs = realTimeUs - ALooper::GetNowUs();
             if (delayUs > 0) {
-                DPR_MSG_ERROR("postDrainVideoQueue video early by %.2f secs", (double)delayUs / 1E6);
+                DPR_MSG_HIGH("postDrainVideoQueue video early by %.2f secs", (double)delayUs / 1E6);
             }
         }
     }
@@ -568,6 +571,9 @@ void DashPlayer::Renderer::onDrainVideoQueue() {
     int64_t nowUs = ALooper::GetNowUs();
     mVideoLateByUs = nowUs - realTimeUs;
 
+    DPR_MSG_HIGH("onDrainVideoQueue mediaTimeUs %lld us mAnchorTimeMediaUs %lld us mAnchorTimeRealUs %lld us",
+             mediaTimeUs, mAnchorTimeMediaUs, mAnchorTimeRealUs);
+
     bool tooLate = (mVideoLateByUs > mAVSyncDelayWindowUs);
 
     if (tooLate && (!mHasAudio || (mediaTimeUs > mAnchorTimeMediaUs)))
@@ -579,13 +585,13 @@ void DashPlayer::Renderer::onDrainVideoQueue() {
     }
 
     if (tooLate) {
-        DPR_MSG_HIGH("video late by %lld us (%.2f secs)",
+        DPR_MSG_ERROR("video late by %lld us (%.2f secs)",
              mVideoLateByUs, (double)mVideoLateByUs / 1E6);
         if(mStats != NULL) {
             mStats->recordLate(realTimeUs,nowUs,mVideoLateByUs,mAnchorTimeRealUs);
         }
     } else {
-        DPR_MSG_HIGH("rendering video at media time %.2f secs", (double)mediaTimeUs / 1E6);
+        DPR_MSG_ERROR("rendering video at media time %.2f secs", (double)mediaTimeUs / 1E6);
         if(mStats != NULL) {
             mStats->recordOnTime(realTimeUs,nowUs,mVideoLateByUs);
             mStats->incrementTotalRenderingFrames();

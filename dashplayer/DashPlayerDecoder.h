@@ -139,6 +139,7 @@ private:
     int32_t mCurrentHeight;
     int32_t mColorFormat;
 
+    int mLogLevel;
 
     DISALLOW_EVIL_CONSTRUCTORS(CCDecoder);
 };
