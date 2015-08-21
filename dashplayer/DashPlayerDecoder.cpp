@@ -162,10 +162,16 @@ void DashPlayer::Decoder::requestCodecNotification() {
         }
 
 bool DashPlayer::Decoder::isStaleReply(const sp<AMessage> &msg) {
-    int32_t generation;
-    CHECK(msg->findInt32("generation", &generation));
-    return generation != mBufferGeneration;
+    bool bStale = false;
+    int32_t generation = -1;
+    if (!(msg->findInt32("generation", &generation)) || (generation != mBufferGeneration))
+    {
+      DPD_MSG_ERROR( "isStaleReply: generation %d mBufferGeneration %d",
+                     generation, mBufferGeneration );
+      bStale = true;
     }
+    return bStale;
+}
 
 void DashPlayer::Decoder::init() {
     mDecoderLooper->registerHandler(this);
