@@ -186,13 +186,14 @@ void DashPlayer::Renderer::onMessageReceived(const sp<AMessage> &msg) {
     switch (msg->what()) {
         case kWhatDrainAudioQueue:
         {
-            int32_t generation;
-            CHECK(msg->findInt32("generation", &generation));
-            if (generation != mAudioQueueGeneration) {
+            mDrainAudioQueuePending = false;
+
+            int32_t generation = -1;
+            if (!(msg->findInt32("generation", &generation)) || (generation != mAudioQueueGeneration)) {
+                DPR_MSG_ERROR( "onMessageReceived - kWhatDrainAudioQueue: generation %d mAudioQueueGeneration %d",
+                               generation, mAudioQueueGeneration );
                 break;
             }
-
-            mDrainAudioQueuePending = false;
 
             if (onDrainAudioQueue()) {
                 uint32_t numFramesPlayed;
@@ -221,13 +222,14 @@ void DashPlayer::Renderer::onMessageReceived(const sp<AMessage> &msg) {
 
         case kWhatDrainVideoQueue:
         {
-            int32_t generation;
-            CHECK(msg->findInt32("generation", &generation));
-            if (generation != mVideoQueueGeneration) {
+            mDrainVideoQueuePending = false;
+
+            int32_t generation = -1;
+            if (!(msg->findInt32("generation", &generation)) || (generation != mVideoQueueGeneration)) {
+                DPR_MSG_ERROR( "onMessageReceived - kWhatDrainVideoQueue: generation %d mVideoQueueGeneration %d",
+                               generation, mVideoQueueGeneration );
                 break;
             }
-
-            mDrainVideoQueuePending = false;
 
             onDrainVideoQueue();
 
