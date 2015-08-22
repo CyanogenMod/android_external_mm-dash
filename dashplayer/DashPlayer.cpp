@@ -655,13 +655,9 @@ void DashPlayer::onMessageReceived(const sp<AMessage> &msg) {
                       DP_MSG_ERROR("Source is null. Exit outputFormatChanged\n");
                       break;
                     }
-                    if (mVideoDecoder == NULL &&
-                            mSource->getDuration(&durationUs) == OK &&
-                            durationUs > AUDIO_SINK_MIN_DEEP_BUFFER_DURATION_US) {
-                        flags = AUDIO_OUTPUT_FLAG_DEEP_BUFFER;
-                    } else {
-                        flags = AUDIO_OUTPUT_FLAG_NONE;
-                    }
+
+                    //Open audio track/sink in deep_buffer mode
+                    flags = AUDIO_OUTPUT_FLAG_DEEP_BUFFER;
 
                     int32_t channelMask;
                     if (!format->findInt32("channel-mask", &channelMask)) {
