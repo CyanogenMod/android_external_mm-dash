@@ -146,9 +146,7 @@ DashPlayer::DashPlayer()
       mVideoDecoderSetupTimeUs(0),
       mDelayRenderingUs(0),
       mFirstVideoSampleUs(-1),
-      mVideoSampleDurationUs(0),
-      mLastReadAudioMediaTimeUs(-1),
-      mLastReadAudioRealTimeUs(-1) {
+      mVideoSampleDurationUs(0) {
       mTrackName = new char[6];
 
       char property_value[PROPERTY_VALUE_MAX] = {0};
@@ -1480,6 +1478,10 @@ status_t DashPlayer::instantiateDecoder(int track, sp<Decoder> *decoder) {
         }
     }
 
+    if (mSource != NULL) {
+        mRenderer->setLiveStream(mSource->isLiveStream());
+    }
+
     sp<AMessage> notify;
     if (track == kAudio) {
         notify = new AMessage(kWhatAudioNotify ,this);
@@ -1489,8 +1491,6 @@ status_t DashPlayer::instantiateDecoder(int track, sp<Decoder> *decoder) {
          if (mRenderer != NULL) {
             mRenderer->setMediaPresence(true,true);
         }
-
-        mLastReadAudioMediaTimeUs = -1;
 
     } else if (track == kVideo) {
         notify = new AMessage(kWhatVideoNotify ,this);
@@ -1674,27 +1674,24 @@ status_t DashPlayer::feedDecoderInputData(int track, const sp<AMessage> &msg) {
             }
         }
 
-        if (mSource != NULL && mSource->isLiveStream() &&
-                      track == kAudio && err == OK) {
+        if (err == OK && mSource != NULL && mSource->isLiveStream()) {
             int64_t timeUs;
             CHECK(accessUnit->meta()->findInt64("timeUs", &timeUs));
 
-            if (timeUs >=0 && mLastReadAudioMediaTimeUs >= 0 &&
-                    ((timeUs - mLastReadAudioMediaTimeUs) > AUDIO_DISCONTINUITY_THRESHOLD) &&
-                    ((ALooper::GetNowUs() - mLastReadAudioRealTimeUs) > AUDIO_DISCONTINUITY_THRESHOLD)) {
-                if (mRenderer != NULL && mDPBSize > 0 && mVideoSampleDurationUs > 0) {
-                    //mRenderer->queueDelay(mDPBSize * mVideoSampleDurationUs);
+            if (track == kAudio) {
+                int32_t disc = 0;
+                accessUnit->meta()->findInt32("sampledisc", &disc);
+                if (disc) {
+                    DP_MSG_ERROR("feedDecoderInputData discontinuity at sample %lld msec", (int64_t)timeUs/1000);
+                    mSkipRenderingAudioUntilMediaTimeUs = timeUs;
                 }
             }
-            mLastReadAudioMediaTimeUs = timeUs;
-            mLastReadAudioRealTimeUs = ALooper::GetNowUs();
 
-            int32_t disc;
-            CHECK(accessUnit->meta()->findInt32("disc", &disc));
-            if(disc)
-            {
-              mSkipRenderingAudioUntilMediaTimeUs = timeUs;
-              ALOGE("feedDecoderInputData discontinuity at sample %lld msec", (int64_t)timeUs/1000);
+            int32_t resizedBufWindow = 0;
+            accessUnit->meta()->findInt32("bufwindowresized", &resizedBufWindow);
+            if (resizedBufWindow && mRenderer != NULL) {
+                DP_MSG_ERROR("feedDecoderInputData bufwindowresized at sample %lld msec", (int64_t)timeUs/1000);
+                mRenderer->signalRefreshAnchorRealTime(true);
             }
         }
 
