@@ -309,8 +309,6 @@ private:
     int64_t mDelayRenderingUs;
     int64_t mFirstVideoSampleUs;
     int64_t mVideoSampleDurationUs;
-    int64_t mLastReadAudioMediaTimeUs;
-    int64_t mLastReadAudioRealTimeUs;
 
     DISALLOW_EVIL_CONSTRUCTORS(DashPlayer);
 };

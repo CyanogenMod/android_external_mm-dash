@@ -53,6 +53,10 @@ struct DashPlayer::Renderer : public AHandler {
         kWhatPosition           = 'posi',
     };
 
+    void setLiveStream(bool bLiveStream);
+
+    void signalRefreshAnchorRealTime(bool bAddStartUpLatency);
+
 protected:
     virtual ~Renderer();
 
@@ -94,9 +98,7 @@ private:
 
     int64_t mAnchorTimeMediaUs;
     int64_t mAnchorTimeRealUs;
-
-    int64_t mStartAnchorTimeMediaUs;
-    int64_t mStartAnchorTimeRealUs;
+    int64_t mRealTimeOffsetUs;
 
     int64_t mSeekTimeUs;
 
@@ -138,6 +140,8 @@ private:
 
     void onDelayQueued();
 
+    void setStartAnchorMediaAndPostDrainQueue();
+
     // for qualcomm statistics profiling
   public:
     void registerStats(sp<DashPlayerStats> stats);
@@ -153,7 +157,16 @@ private:
     int64_t mDelayToQueueUs;
     int64_t mDelayToQueueTimeRealUs;
 
-    int64_t mPausedTimeRealUs;
+    bool mIsLiveStream;
+
+    Mutex mRefreshAnchorTimeLock;
+
+    int64_t mStartUpLatencyBeginUs;
+    int64_t mStartUpLatencyUs;
+
+    bool mDiscFromAnchorRealTimeRefresh;
+
+    int64_t mLastRenderedTimeMediaUs;
 
     DISALLOW_EVIL_CONSTRUCTORS(Renderer);
 };
