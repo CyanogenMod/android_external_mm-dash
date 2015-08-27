@@ -65,12 +65,12 @@ DashPlayer::Decoder::Decoder(
     mCodecLooper->setName("DashPlayerDecoder-MC");
     mCodecLooper->start(false, false, ANDROID_PRIORITY_AUDIO);
 
-      char property_value[PROPERTY_VALUE_MAX] = {0};
-      property_get("persist.dash.debug.level", property_value, NULL);
+    char property_value[PROPERTY_VALUE_MAX] = {0};
+    property_get("persist.dash.debug.level", property_value, NULL);
 
-      if(*property_value) {
-          mLogLevel = atoi(property_value);
-      }
+    if(*property_value) {
+        mLogLevel = atoi(property_value);
+    }
 }
 
 DashPlayer::Decoder::~Decoder() {
@@ -639,7 +639,6 @@ struct CCData
     if (mData1 >= 0x10 && mData1 <= 0x1f)
     {
       *channel = (mData1 >= 0x18 ? 1 : 0) + (mType ? 2 : 0);
-      ALOGE("CCDecoder: getChannel %d", *channel);
       return true;
     }
     return false;
@@ -658,6 +657,13 @@ DashPlayer::CCDecoder::CCDecoder(const sp<AMessage> &notify)
   for (size_t i = 0; i < sizeof(mTrackIndices)/sizeof(mTrackIndices[0]); ++i)
   {
     mTrackIndices[i] = -1;
+  }
+
+  char property_value[PROPERTY_VALUE_MAX] = {0};
+  property_get("persist.dash.debug.level", property_value, NULL);
+
+  if(*property_value) {
+      mLogLevel = atoi(property_value);
   }
 }
 
@@ -755,7 +761,7 @@ sp<AMessage> DashPlayer::CCDecoder::getTrackInfo(size_t index) const
 {
   if (!isTrackValid(index))
   {
-    ALOGE("CCDecoder: getTrackInfo - NotValid track");
+    DPD_MSG_ERROR("CCDecoder: getTrackInfo - NotValid track");
     return NULL;
   }
 
@@ -779,27 +785,27 @@ status_t DashPlayer::CCDecoder::selectTrack(size_t index, bool select)
 {
   if (!isTrackValid(index))
   {
-    ALOGE("CCDecoder: selectTrack - NotValid track");
+    DPD_MSG_ERROR("CCDecoder: selectTrack - NotValid track");
     return BAD_VALUE;
   }
   if (select)
   {
     if (mSelectedTrack == (ssize_t)index)
     {
-      ALOGV("CCDecoder: track %zu already selected", index);
+      DPD_MSG_HIGH("CCDecoder: track %zu already selected", index);
       return BAD_VALUE;
     }
-    ALOGV("CCDecoder: selected track %zu", index);
+    DPD_MSG_HIGH("CCDecoder: selected track %zu", index);
     mSelectedTrack = index;
   }
   else
   {
     if (mSelectedTrack != (ssize_t)index)
     {
-      ALOGV("CCDecoder: track %zu is not selected", index);
+      DPD_MSG_ERROR("CCDecoder: track %zu is not selected", index);
       return BAD_VALUE;
     }
-    ALOGV("CCDecoder: unselected track %zu", index);
+    DPD_MSG_HIGH("CCDecoder: unselected track %zu", index);
     mSelectedTrack = -1;
   }
   return OK;
@@ -851,7 +857,7 @@ bool  DashPlayer::CCDecoder::extractPictureUserData
      bool process_cc_data_flag = br.getBits(1);
      br.skipBits(1); //additional_data_flag
      size_t cc_count = br.getBits(5);
-     ALOGV("CCDecoder: CEA CC cc_count : %d",cc_count);
+     DPD_MSG_HIGH("CCDecoder: CEA CC cc_count : %d",cc_count);
      br.skipBits(8); // em_data;
 
      if (process_cc_data_flag)
@@ -861,7 +867,6 @@ bool  DashPlayer::CCDecoder::extractPictureUserData
 
        for (size_t i = 0; i < cc_count; i++)
        {
-         ALOGV("CCDecoder: Processing cc_data_pkt #: %d",i);
          uint8_t marker = br.getBits(5);
          CHECK_EQ(marker, 0x1f);
          bool cc_valid = br.getBits(1);
@@ -869,7 +874,7 @@ bool  DashPlayer::CCDecoder::extractPictureUserData
          //PrintCCTypeCombo(cc_valid, cc_type);
          uint8_t cc_data_1 = br.getBits(8) & 0x7f;
          uint8_t cc_data_2 = br.getBits(8) & 0x7f;
-         ALOGV("CCDecoder: cc_data_1 0x%x cc_data_2 0x%x", cc_data_1, cc_data_2);
+         DPD_MSG_HIGH("CCDecoder: Processing cc_data_pkt #: %d cc_data_1 0x%x cc_data_2 0x%x", i, cc_data_1, cc_data_2);
          //If field “x” Buffer is empty at the transmit time of NTSC field “x”, a CEA-608 waveform should be
          //generated for that field with cc_data_1 = 0x80 and cc_data_2 = 0x80
          //in CEA-608 notation, two 0x00s with odd parity,remove odd parity bit
@@ -885,7 +890,7 @@ bool  DashPlayer::CCDecoder::extractPictureUserData
                   mTrackIndices[channel] = mFoundChannels.size();
                   mFoundChannels.push_back(channel);
                   trackAdded = true;
-                  ALOGE("CCDecoder: CEA TrackAdded successfully");
+                  DPD_MSG_HIGH("CCDecoder: CEA TrackAdded successfully - channel %d index %d", channel,  mTrackIndices[channel]);
              }
              memcpy(ccBuf->data() + ccBuf->size(),(void *)&cc, sizeof(cc));
              ccBuf->setRange(0, ccBuf->size() + sizeof(CCData));
@@ -893,21 +898,21 @@ bool  DashPlayer::CCDecoder::extractPictureUserData
            }
            else
            {
-             ALOGW("CCDecoder: CEA null pad %d", i);
+             DPD_MSG_HIGH("CCDecoder: CEA null pad %d", i);
            }
          }
          else
          {
-            ALOGV("CCDecoder: CEA-708 cc_valid %d cc_type %d", cc_valid, cc_type);
+            DPD_MSG_HIGH("CCDecoder: CEA-708 cc_valid %d cc_type %d", cc_valid, cc_type);
          }
        }
-       ALOGV("CCDecoder: mCCMap.add timeUs %lld ccBuf.size() %d", mediaTimeUs , ccBuf->size());
+       DPD_MSG_HIGH("CCDecoder: mCCMap.add timeUs %lld ccBuf.size() %d", mediaTimeUs , ccBuf->size());
        //printmCCMap();
      }
   }
   else
   {
-    ALOGE("CCDecoder: Malformed SEI payload type 4");
+    DPD_MSG_ERROR("CCDecoder: Malformed SEI payload type 4");
   }
   return trackAdded;
 }
@@ -941,7 +946,7 @@ void DashPlayer::CCDecoder::decode(OMX_U8 *pictureUserData,
 {
   if (extractPictureUserData(pictureUserData, pictureUserDataSize, mediaTimeUs))
   {
-    ALOGV("CCDecoder: Found CEA-608 track");
+    DPD_MSG_ERROR("CCDecoder: Found CEA-608 track");
     if (mNotify != NULL)
     {
       sp<AMessage> msg = mNotify->dup();
@@ -951,22 +956,21 @@ void DashPlayer::CCDecoder::decode(OMX_U8 *pictureUserData,
   }
 }
 
-
 void DashPlayer::CCDecoder::display(int64_t timeUs)
 {
   if (!isTrackValid(mSelectedTrack))
   {
-    ALOGE("CCDecoder: display Could not find current track(index=%d)", mSelectedTrack);
+    DPD_MSG_ERROR("CCDecoder: display Could not find current track(index=%d)", mSelectedTrack);
     return;
   }
 
   ssize_t index = mCCMap.indexOfKey(timeUs);
   if (index < 0)
   {
-    ALOGE("CCDecoder: display cc for timestamp %lld not found", timeUs);
+    DPD_MSG_ERROR("CCDecoder: display cc for timestamp %lld not found", timeUs);
     return;
   }
-  ALOGI("CCDecoder: display found TS %lld at index %d", timeUs, index);
+  DPD_MSG_ERROR("CCDecoder: display found TS %lld at index %d", timeUs, index);
   //printmCCMap();
   sp<ABuffer> ccBuf = filterCCBuf(mCCMap.valueAt(index), mSelectedTrack);
 
@@ -986,7 +990,7 @@ void DashPlayer::CCDecoder::display(int64_t timeUs)
   }
   else
   {
-    ALOGE("CCDecoder: ccBuf->size() is zero");
+    DPD_MSG_ERROR("CCDecoder: ccBuf->size() is zero");
   }
   // remove all entries before timeUs
   mCCMap.removeItemsAt(0, index + 1);
@@ -998,31 +1002,55 @@ void DashPlayer::CCDecoder::flush() {
 
 void DashPlayer::CCDecoder::PrintCCTypeCombo(bool cc_valid, uint8_t cc_type)
 {
-  ALOGE("CCDecoder: cc_valid %d and cc_type %d",cc_valid, cc_type);
+  DPD_MSG_MEDIUM("CCDecoder: cc_valid %d and cc_type %d",cc_valid, cc_type);
   if (cc_valid)
   {
-    if(cc_type == 0 ) ALOGW("CEA-608 line 21 field 1 CC bytes");
-    else if(cc_type == 1 ) ALOGW("CEA-608 line 21 field 2 CC bytes");
-    else if(cc_type == 2 ) ALOGW("Continuing CCP: cc_data_1/cc_data_2 CCP data");
-    else if(cc_type == 3 ) ALOGW("start CCP: cc_data_1 CCP Header and cc_data_2 CCP data ");
+    if(cc_type == 0 )
+    {
+      DPD_MSG_MEDIUM("CEA-608 line 21 field 1 CC bytes");
+    }
+    else if(cc_type == 1 )
+    {
+      DPD_MSG_MEDIUM("CEA-608 line 21 field 2 CC bytes");
+    }
+    else if(cc_type == 2 )
+    {
+      DPD_MSG_MEDIUM("Continuing CCP: cc_data_1/cc_data_2 CCP data");
+    }
+    else if(cc_type == 3 )
+    {
+      DPD_MSG_MEDIUM("start CCP: cc_data_1 CCP Header and cc_data_2 CCP data ");
+    }
   }
   else
   {
-    if(cc_type == 0 ) ALOGW("CEA-608 line 21 field 1 - DTVCC padding bytes");
-    else if(cc_type == 1 ) ALOGW("CEA-608 line 21 field 2 - DTVCC padding bytes");
-    else if(cc_type == 2 ) ALOGW("DTV CC padding bytes");
-    else if(cc_type == 3 ) ALOGW("DTV CC padding bytes");
+    if(cc_type == 0 )
+    {
+      DPD_MSG_MEDIUM("CEA-608 line 21 field 1 - DTVCC padding bytes");
+    }
+    else if(cc_type == 1 )
+    {
+      DPD_MSG_MEDIUM("CEA-608 line 21 field 2 - DTVCC padding bytes");
+    }
+    else if(cc_type == 2 )
+    {
+      DPD_MSG_MEDIUM("DTV CC padding bytes");
+    }
+    else if(cc_type == 3 )
+    {
+      DPD_MSG_MEDIUM("DTV CC padding bytes");
+    }
   }
 }
 
 void DashPlayer::CCDecoder::printmCCMap()
 {
-  ALOGV("CCDecoder: printmCCMap size %d ", mCCMap.size());
+  DPD_MSG_HIGH("CCDecoder: printmCCMap size %d ", mCCMap.size());
   for (size_t i = 0; i < mCCMap.size(); ++i)
   {
     const sp<ABuffer> ccBuf =  mCCMap.valueAt(i);
     const int64_t timeUs = mCCMap.keyAt(i);
-    ALOGV("CCDecoder: CCMap[%d] ccBuf size %d and timeTs %lld", i, ccBuf->size(),timeUs );
+    DPD_MSG_HIGH("CCDecoder: CCMap[%d] ccBuf size %d and timeTs %lld", i, ccBuf->size(),timeUs );
   }
 }
 
