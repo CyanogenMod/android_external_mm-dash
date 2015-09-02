@@ -1,4 +1,4 @@
-ifeq ($(call is-board-platform-in-list,msm8916 msm8994),true)
+ifeq ($(call is-board-platform-in-list,msm8909 msm8916 msm8994),true)
 
 QCOM_MEDIA_ROOT := $(call my-dir)
 ifneq ($(TARGET_DISABLE_DASH),true)
