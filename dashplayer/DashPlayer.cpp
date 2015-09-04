@@ -1683,11 +1683,19 @@ status_t DashPlayer::feedDecoderInputData(int track, const sp<AMessage> &msg) {
                     ((timeUs - mLastReadAudioMediaTimeUs) > AUDIO_DISCONTINUITY_THRESHOLD) &&
                     ((ALooper::GetNowUs() - mLastReadAudioRealTimeUs) > AUDIO_DISCONTINUITY_THRESHOLD)) {
                 if (mRenderer != NULL && mDPBSize > 0 && mVideoSampleDurationUs > 0) {
-                    mRenderer->queueDelay(mDPBSize * mVideoSampleDurationUs);
+                    //mRenderer->queueDelay(mDPBSize * mVideoSampleDurationUs);
                 }
             }
             mLastReadAudioMediaTimeUs = timeUs;
             mLastReadAudioRealTimeUs = ALooper::GetNowUs();
+
+            int32_t disc;
+            CHECK(accessUnit->meta()->findInt32("disc", &disc));
+            if(disc)
+            {
+              mSkipRenderingAudioUntilMediaTimeUs = timeUs;
+              ALOGE("feedDecoderInputData discontinuity at sample %lld msec", (int64_t)timeUs/1000);
+            }
         }
 
         dropAccessUnit = false;
@@ -1760,6 +1768,10 @@ void DashPlayer::renderBuffer(bool audio, const sp<AMessage> &msg) {
 
             reply->post();
             return;
+        }
+
+        if (mediaTimeUs == skipUntilMediaTimeUs) {
+            buffer->meta()->setInt32("disc", 1);
         }
 
         skipUntilMediaTimeUs = -1;
