@@ -97,8 +97,8 @@ struct DashPlayer::Source : public RefBase {
       return INVALID_OPERATION;
     }
 
-    virtual status_t getTrackInfo(Parcel */*reply*/) {
-      return INVALID_OPERATION;
+    virtual sp<AMessage> getTrackInfo(size_t /*index*/) {
+      return NULL;
     }
 
     virtual status_t getTrackCount()

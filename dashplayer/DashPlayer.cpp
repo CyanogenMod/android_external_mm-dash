@@ -2197,11 +2197,14 @@ status_t DashPlayer::getParameter(int key, Parcel *reply)
     {
       size_t numInbandTracks = (mSource != NULL) ? mSource->getTrackCount() : 0;
       size_t numCCTracks  = (mCCDecoder != NULL) ? mCCDecoder->getTrackCount() : 0;
+      DP_MSG_HIGH("DashPlayer::getParameter #InbandTracks %d #ccTracks %d ", numInbandTracks, numCCTracks);
       // total track count
       reply->writeInt32(numInbandTracks + numCCTracks);
       // write inband tracks
-      err = mSource->getTrackInfo(reply);
-      DP_MSG_HIGH("DashPlayer::getParameter # ccTracks %d", numCCTracks);
+      for (size_t i = 0; i < numInbandTracks; ++i) {
+          writeTrackInfo(reply, mSource->getTrackInfo(i));
+      }
+      // write CC track
       if (err == OK &&
           numCCTracks > 0 &&
           mCCDecoder != NULL)
@@ -2281,24 +2284,22 @@ void DashPlayer::writeTrackInfo(
   Parcel* reply, const sp<AMessage> format) const
 {
   int32_t trackType;
-  CHECK(format->findInt32("type", &trackType));
   AString lang;
+  AString mime;
+  CHECK(format->findInt32("type", &trackType));
   CHECK(format->findString("language", &lang));
-  reply->writeInt32(2); // write something non-zero
+  CHECK(format->findString("mime", &mime));
+  reply->writeInt32(2);
   reply->writeInt32(trackType);
+  reply->writeString16(String16(mime.c_str()));
   reply->writeString16(String16(lang.c_str()));
 
  if (trackType == MEDIA_TRACK_TYPE_SUBTITLE)
  {
-   AString mime;
-   CHECK(format->findString("mime", &mime));
-
    int32_t isAuto, isDefault, isForced;
    CHECK(format->findInt32("auto", &isAuto));
    CHECK(format->findInt32("default", &isDefault));
    CHECK(format->findInt32("forced", &isForced));
-
-   reply->writeString16(String16(mime.c_str()));
    reply->writeInt32(isAuto);
    reply->writeInt32(isDefault);
    reply->writeInt32(isForced);
