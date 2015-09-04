@@ -17,6 +17,7 @@ LOCAL_SHARED_LIBRARIES := \
 LOCAL_C_INCLUDES += \
     $(TOP)/frameworks/base/core/jni \
     $(TOP)/frameworks/av/media/libstagefright \
+    $(LOCAL_PATH)/.. \
 
 LOCAL_MODULE:= libextmedia_jni
 
