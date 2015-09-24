@@ -331,6 +331,53 @@ public class QCMediaPlayer extends MediaPlayer {
         }
     }
 
+
+    /**
+     * Class for QCMediaPlayer to return TSB left, right boundaries and depth.
+     *
+     */
+    static public class RepositionRangeInfo {
+        public RepositionRangeInfo(Parcel in) {
+            mLowerBoundary = in.readLong();
+            mUpperBoundary = in.readLong();
+            mDepth = in.readLong();
+        }
+
+        public RepositionRangeInfo() {
+            mLowerBoundary = 0;
+            mUpperBoundary = 0;
+            mDepth = 0;
+        }
+
+        final long mLowerBoundary;
+        final long mUpperBoundary;
+        final long mDepth;
+
+        /**
+         * Gets the lower boundary.
+         * @return lower boundary of the reposition range.
+         */
+        public long getLowerBoundary() {
+            return mLowerBoundary;
+        }
+
+        /**
+         * Gets the upper boundary.
+         * @return upper boundary of the reposition range.
+         */
+        public long getUpperBoundary() {
+            return mUpperBoundary;
+        }
+
+        /**
+         * Gets the depth.
+         * @return depth of the reposition range (i.e. upper boundary - lower boundary).
+         */
+        public long getDepth() {
+            return mDepth;
+        }
+    };
+
     /**
      * Returns the version of QCMediaPlayer
      *
@@ -349,12 +396,15 @@ public class QCMediaPlayer extends MediaPlayer {
         Log.d(TAG, "getMPDProperties");
         Parcel request = newRequest();
         Parcel reply = Parcel.obtain();
-        request.writeInt(INVOKE_ID_GET_MPD_PROPERTIES);
-        invoke(request, reply);
-        String retval = reply.readString();
-        request.recycle();
-        reply.recycle();
-        return retval;
+        try {
+            request.writeInt(INVOKE_ID_GET_MPD_PROPERTIES);
+            invoke(request, reply);
+            String retval = reply.readString();
+            return retval;
+        } finally {
+            request.recycle();
+            reply.recycle();
+        }
     }
 
     /**
@@ -367,13 +417,16 @@ public class QCMediaPlayer extends MediaPlayer {
         Log.d(TAG, "setMPDProperties");
         Parcel request = newRequest();
         Parcel reply = Parcel.obtain();
-        request.writeInt(INVOKE_ID_SET_MPD_PROPERTIES);
-        request.writeString(value);
-        invoke(request, reply);
-        boolean retval = reply.readInt() > 0 ? true : false;
-        request.recycle();
-        reply.recycle();
-        return retval;
+        try {
+            request.writeInt(INVOKE_ID_SET_MPD_PROPERTIES);
+            request.writeString(value);
+            invoke(request, reply);
+            boolean retval = reply.readInt() > 0 ? true : false;
+            return retval;
+        } finally {
+            request.recycle();
+            reply.recycle();
+        }
     }
 
     /**
@@ -385,27 +438,35 @@ public class QCMediaPlayer extends MediaPlayer {
         Log.d(TAG, "getMPD");
         Parcel request = newRequest();
         Parcel reply = Parcel.obtain();
-        request.writeInt(INVOKE_ID_GET_MPD);
-        invoke(request, reply);
-        String retval = reply.readString();
-        request.recycle();
-        reply.recycle();
-        return retval;
+        try {
+            request.writeInt(INVOKE_ID_GET_MPD);
+            invoke(request, reply);
+            String retval = reply.readString();
+            return retval;
+        } finally {
+            request.recycle();
+            reply.recycle();
+        }
     }
 
     /**
      * Returns the timeshiftBuffer boundaries
      *
-     * @return Parcel having TSB left and right edge boundaries
+     * @return RepositionRangeInfo object
      */
-    public Parcel getTSBRepositionRange() {
+    public RepositionRangeInfo getTSBRepositionRange() {
         Log.d(TAG, "getTSBRepositionRange");
         Parcel request = newRequest();
         Parcel reply = Parcel.obtain();
-        request.writeInt(KEY_DASH_REPOSITION_RANGE);
-        invoke(request, reply);
-        request.recycle();
-        return reply;
+        try {
+            request.writeInt(KEY_DASH_REPOSITION_RANGE);
+            invoke(request, reply);
+            RepositionRangeInfo rangeInfo = new RepositionRangeInfo(reply);
+            return rangeInfo;
+        } finally {
+            request.recycle();
+            reply.recycle();
+        }
     }
 
     /**
@@ -417,12 +478,15 @@ public class QCMediaPlayer extends MediaPlayer {
         Log.d(TAG, "pushBlankFrametoDisplay");
         Parcel request = newRequest();
         Parcel reply = Parcel.obtain();
-        request.writeInt(INVOKE_ID_PUSH_BLANK_FRAME);
-        invoke(request, reply);
-        boolean retval = reply.readInt() > 0 ? true : false;
-        request.recycle();
-        reply.recycle();
-        return retval;
+        try {
+            request.writeInt(INVOKE_ID_PUSH_BLANK_FRAME);
+            invoke(request, reply);
+            boolean retval = reply.readInt() > 0 ? true : false;
+            return retval;
+        } finally {
+            request.recycle();
+            reply.recycle();
+        }
     }
 
     /**
@@ -434,14 +498,17 @@ public class QCMediaPlayer extends MediaPlayer {
         Log.d(TAG, "regQOEEvents: " + value);
         Parcel request = newRequest();
         Parcel reply = Parcel.obtain();
-        request.writeInt(ATTRIBUTES_QOE_EVENT_REG);
-        int regEvent = (value == true) ? 1 : 0;
-        request.writeInt(regEvent);
-        invoke(request, reply);
-        boolean retval = reply.readInt() > 0 ? true : false;
-        request.recycle();
-        reply.recycle();
-        return retval;
+        try {
+            request.writeInt(ATTRIBUTES_QOE_EVENT_REG);
+            int regEvent = (value == true) ? 1 : 0;
+            request.writeInt(regEvent);
+            invoke(request, reply);
+            boolean retval = reply.readInt() > 0 ? true : false;
+            return retval;
+        } finally {
+            request.recycle();
+            reply.recycle();
+        }
     }
 
     /**
@@ -453,10 +520,13 @@ public class QCMediaPlayer extends MediaPlayer {
         Log.d(TAG, "getQOEPeriodicParameter");
         Parcel request = newRequest();
         Parcel reply = Parcel.obtain();
-        request.writeInt(ATTRIBUTES_QOE_EVENT_PERIODIC);
-        invoke(request, reply);
-        request.recycle();
-        return reply;
+        try {
+            request.writeInt(ATTRIBUTES_QOE_EVENT_PERIODIC);
+            invoke(request, reply);
+            return reply;
+        } finally {
+            request.recycle();
+        }
     }
 
     /**
@@ -478,13 +548,16 @@ public class QCMediaPlayer extends MediaPlayer {
         Log.d(TAG, "QCsetParameter key " + key);
         Parcel request = newRequest();
         Parcel reply = Parcel.obtain();
-        request.writeInt(key);
-        request.writeInt(value);
-        invoke(request, reply);
-        boolean retval = reply.readInt() > 0 ? true : false;
-        request.recycle();
-        reply.recycle();
-        return retval;
+        try {
+            request.writeInt(key);
+            request.writeInt(value);
+            invoke(request, reply);
+            boolean retval = reply.readInt() > 0 ? true : false;
+            return retval;
+        } finally {
+            request.recycle();
+            reply.recycle();
+        }
     }
 
     /**
@@ -505,9 +578,12 @@ public class QCMediaPlayer extends MediaPlayer {
 
         Parcel request = newRequest();
         Parcel reply = Parcel.obtain();
-        request.writeInt(key);
-        invoke(request, reply);
-        request.recycle();
-        return reply;
+        try {
+            request.writeInt(key);
+            invoke(request, reply);
+            return reply;
+        } finally {
+            request.recycle();
+        }
     }
 }
