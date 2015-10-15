@@ -146,6 +146,7 @@ DashPlayer::DashPlayer()
       mVideoDecoderStartTimeUs(0),
       mVideoDecoderSetupTimeUs(0),
       mDelayRenderingUs(0),
+      mStarted(false),
       mFirstVideoSampleUs(-1),
       mVideoSampleDurationUs(0) {
       mTrackName = new char[6];
@@ -322,7 +323,7 @@ void DashPlayer::onMessageReceived(const sp<AMessage> &msg) {
             /* reinstantiation of video decoder and video playback continues.       */
             /*  TODO: Dynamic disible and reenable of video also requies support    */
             /* from dash source.                                                    */
-            DP_MSG_ERROR("kWhatSetVideoNativeWindow");
+            DP_MSG_ERROR("kWhatSetVideoNativeWindow mStarted %d",mStarted);
 
             /* if existing instance mNativeWindow=NULL updates mNativeWindow to new
              * new value and triggers scan sources. postScanSources() needs to be
@@ -344,6 +345,12 @@ void DashPlayer::onMessageReceived(const sp<AMessage> &msg) {
               sp<DashPlayerDriver> driver = mDriver.promote();
               if (driver != NULL) {
                  driver->notifySetSurfaceComplete();
+                  int currentPositionMs = 0;
+                  if (mStarted && obj.get() != NULL && driver->getCurrentPosition(&currentPositionMs) == OK) {
+                    DP_MSG_HIGH("posting Seek after kWhatSetVideoNativeWindow at time %d ms",currentPositionMs);
+                     int64_t seekTimeUs = currentPositionMs*1000ll;
+                     seekToAsync(seekTimeUs);
+                  }
                 }
               }
 
@@ -414,7 +421,7 @@ void DashPlayer::onMessageReceived(const sp<AMessage> &msg) {
         case kWhatStart:
         {
             DP_MSG_ERROR("kWhatStart");
-
+            mStarted = true;
             mVideoIsAVC = false;
             mAudioEOS = false;
             mVideoEOS = false;
@@ -1429,6 +1436,7 @@ void DashPlayer::finishReset() {
             driver->notifyResetComplete();
         }
     }
+    mStarted = false;
 }
 
 void DashPlayer::postScanSources() {
