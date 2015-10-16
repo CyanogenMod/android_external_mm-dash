@@ -1836,6 +1836,7 @@ void DashPlayer::renderBuffer(bool audio, const sp<AMessage> &msg) {
                                               * VENUS_UV_SCANLINES(COLOR_FMT_NV12, mCurrentHeight));
                 allocLen = VENUS_BUFFER_SIZE(COLOR_FMT_NV12, mCurrentWidth, mCurrentHeight);
               }
+#ifdef HAVE_UBWC
               else if (mColorFormat == 0x7FA30C06 /*QOMX_COLOR_FORMATYUV420PackedSemiPlanar32mCompressed*/)
               {
                 unsigned int y_stride = VENUS_Y_STRIDE(COLOR_FMT_NV12_UBWC, mCurrentWidth);
@@ -1854,7 +1855,7 @@ void DashPlayer::renderBuffer(bool audio, const sp<AMessage> &msg) {
                 filledLen = y_ubwc_plane + uv_ubwc_plane + y_meta_plane + uv_meta_plane;
                 allocLen = VENUS_BUFFER_SIZE(COLOR_FMT_NV12_UBWC, mCurrentWidth, mCurrentHeight);
               }
-
+#endif
               if (filledLen > 0 && allocLen > 0)
               {
                 size_t offset = buffer->offset();
