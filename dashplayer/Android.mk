@@ -53,6 +53,10 @@ LOCAL_MODULE:= libdashplayer
 
 LOCAL_MODULE_TAGS := eng
 
+ifeq ($(call is-board-platform-in-list,msm8994),true)
+    LOCAL_CFLAGS += -DHAVE_UBWC
+endif
+
 ifeq ($(TARGET_ENABLE_QC_AV_ENHANCEMENTS), true)
  include $(BUILD_SHARED_LIBRARY)
 endif
