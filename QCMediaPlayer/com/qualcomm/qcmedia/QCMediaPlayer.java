@@ -384,7 +384,7 @@ public class QCMediaPlayer extends MediaPlayer {
      * @return QCMediaPlayer version as a double
      */
     public double getPlayerVersion() {
-        return 1.0;
+        return 1.1;
     }
 
     /**
