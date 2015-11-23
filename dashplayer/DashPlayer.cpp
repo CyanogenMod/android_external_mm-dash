@@ -48,6 +48,7 @@
 #define DP_MSG_LOW(...) if(mLogLevel >= 3){ALOGE(__VA_ARGS__);}
 
 #define AUDIO_DISCONTINUITY_THRESHOLD 100000ll
+#define AUDIO_TS_DISCONTINUITY_THRESHOLD 200000ll
 
 namespace android {
 
@@ -148,7 +149,9 @@ DashPlayer::DashPlayer()
       mDelayRenderingUs(0),
       mStarted(false),
       mFirstVideoSampleUs(-1),
-      mVideoSampleDurationUs(0) {
+      mVideoSampleDurationUs(0),
+      mLastReadAudioMediaTimeUs(-1),
+      mLastReadAudioRealTimeUs(-1) {
       mTrackName = new char[6];
 
       char property_value[PROPERTY_VALUE_MAX] = {0};
@@ -1501,6 +1504,8 @@ status_t DashPlayer::instantiateDecoder(int track, sp<Decoder> *decoder) {
             mRenderer->setMediaPresence(true,true);
         }
 
+        mLastReadAudioMediaTimeUs = -1;
+
     } else if (track == kVideo) {
         notify = new AMessage(kWhatVideoNotify ,this);
         *decoder = new Decoder(notify, mNativeWindow);
@@ -1687,20 +1692,39 @@ status_t DashPlayer::feedDecoderInputData(int track, const sp<AMessage> &msg) {
             int64_t timeUs;
             CHECK(accessUnit->meta()->findInt64("timeUs", &timeUs));
 
-            if (track == kAudio) {
-                int32_t disc = 0;
-                accessUnit->meta()->findInt32("sampledisc", &disc);
-                if (disc) {
-                    DP_MSG_ERROR("feedDecoderInputData discontinuity at sample %lld msec", (int64_t)timeUs/1000);
-                    mSkipRenderingAudioUntilMediaTimeUs = timeUs;
-                }
+            int32_t lookAheadWindowMode = 0;
+            if (accessUnit->meta()->findInt32("lookAheadWindowMode", &lookAheadWindowMode)) {
+                mRenderer->setLookAheadWindowMode(lookAheadWindowMode);
             }
 
-            int32_t resizedBufWindow = 0;
-            accessUnit->meta()->findInt32("bufwindowresized", &resizedBufWindow);
-            if (resizedBufWindow && mRenderer != NULL) {
-                DP_MSG_ERROR("feedDecoderInputData bufwindowresized at sample %lld msec", (int64_t)timeUs/1000);
-                mRenderer->signalRefreshAnchorRealTime(true);
+            if (lookAheadWindowMode) {
+                if (track == kAudio) {
+                    int32_t disc = 0;
+                    accessUnit->meta()->findInt32("lookAheadWindowSampledisc", &disc);
+                    if (disc) {
+                        DP_MSG_ERROR("feedDecoderInputData discontinuity at sample %lld msec", (int64_t)timeUs/1000);
+                        mSkipRenderingAudioUntilMediaTimeUs = timeUs;
+                    }
+                }
+
+                int32_t windowResize = 0;
+                accessUnit->meta()->findInt32("lookAheadWindowResized", &windowResize);
+                if (windowResize && mRenderer != NULL) {
+                    DP_MSG_ERROR("feedDecoderInputData bufwindowresized at sample %lld msec", (int64_t)timeUs/1000);
+                    mRenderer->signalRefreshAnchorRealTime(true);
+                }
+            } else {
+                if (track == kAudio) {
+                    if (timeUs >=0 && mLastReadAudioMediaTimeUs >= 0 &&
+                       ((timeUs - mLastReadAudioMediaTimeUs) > AUDIO_TS_DISCONTINUITY_THRESHOLD) &&
+                       ((ALooper::GetNowUs() - mLastReadAudioRealTimeUs) > AUDIO_DISCONTINUITY_THRESHOLD)) {
+                        if (mRenderer != NULL && mDPBSize > 0 && mVideoSampleDurationUs > 0) {
+                            mRenderer->queueDelay(mDPBSize * mVideoSampleDurationUs);
+                        }
+                    }
+                    mLastReadAudioMediaTimeUs = timeUs;
+                    mLastReadAudioRealTimeUs = ALooper::GetNowUs();
+                }
             }
         }
 

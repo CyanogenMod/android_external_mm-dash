@@ -114,6 +114,10 @@ struct DashPlayer::Source : public RefBase {
         return false;
     }
 
+    virtual bool isLookAheadWindowModeEnabled() {
+        return false;
+    }
+
 protected:
     virtual ~Source() {}
 

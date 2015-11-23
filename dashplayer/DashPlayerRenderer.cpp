@@ -44,6 +44,7 @@ DashPlayer::Renderer::Renderer(
       mVideoQueueGeneration(0),
       mAnchorTimeMediaUs(-1),
       mAnchorTimeRealUs(-1),
+      mRealTimeOffsetUs(0),
       mSeekTimeUs(0),
       mFlushingAudio(false),
       mFlushingVideo(false),
@@ -63,7 +64,8 @@ DashPlayer::Renderer::Renderer(
       mIsLiveStream(false),
       mStartUpLatencyBeginUs(-1),
       mStartUpLatencyUs(0),
-      mDiscFromAnchorRealTimeRefresh(false) {
+      mDiscFromAnchorRealTimeRefresh(false),
+      mLookAheadWindowMode(false) {
 
       mAVSyncDelayWindowUs = 40000;
 
@@ -120,7 +122,7 @@ void DashPlayer::Renderer::queueEOS(bool audio, status_t finalResult) {
 }
 
 void DashPlayer::Renderer::queueDelay(int64_t delayUs) {
-    Mutex::Autolock autoLock(mDelayLock);
+    Mutex::Autolock autoLock(mRendererDataLock);
     if (mDelayPending) {
         // Earlier posted delay still processing.
         mDelayToQueueUs = delayUs;
@@ -188,7 +190,7 @@ void DashPlayer::Renderer::resume() {
 
 
 void DashPlayer::Renderer::signalRefreshAnchorRealTime(bool bAddStartUpLatency) {
-    Mutex::Autolock autoLock(mRefreshAnchorTimeLock);
+    Mutex::Autolock autoLock(mRendererDataLock);
 
     if (mAnchorTimeMediaUs > -1 && mAnchorTimeRealUs > -1) {
         int64_t oldAnchorTimeRealUs = mAnchorTimeRealUs;
@@ -327,7 +329,7 @@ void DashPlayer::Renderer::onDelayQueued() {
     int64_t delayToQueueUs;
     int64_t delayToQueueTimeRealUs;
     {
-        Mutex::Autolock autoLock(mDelayLock);
+        Mutex::Autolock autoLock(mRendererDataLock);
         mDelayPending = false;
         delayToQueueUs = mDelayToQueueUs;
         delayToQueueTimeRealUs = mDelayToQueueTimeRealUs;
@@ -447,7 +449,7 @@ bool DashPlayer::Renderer::onDrainAudioQueue() {
                 }
 
                 int32_t disc;
-                if (((mDiscFromAnchorRealTimeRefresh) || (entry->mBuffer->meta()->findInt32("disc", &disc) && disc == 1))
+                if (mLookAheadWindowMode && ((mDiscFromAnchorRealTimeRefresh) || (entry->mBuffer->meta()->findInt32("disc", &disc) && disc == 1))
                         && (mAnchorTimeMediaUs > 0) && (mAnchorTimeRealUs > 0)) {
                     int64_t realTimeUs = (mediaTimeUs - mAnchorTimeMediaUs) + mAnchorTimeRealUs;
                     int64_t delayUs = realTimeUs - ALooper::GetNowUs();
@@ -559,6 +561,15 @@ void DashPlayer::Renderer::postDrainVideoQueue() {
                     mAnchorTimeMediaUs = mediaTimeUs;
                     mAnchorTimeRealUs = ALooper::GetNowUs();
                 } else if (!mAudioQueue.empty()) {
+                    // This is for a pause-resume when both A V are present
+                    // and we are in V only 404s phase within TSB. This check
+                    // waits for first A sample to be rendered and then start
+                    // rendering V samples. Needed as after resume first
+                    // V TS > A TS since V's were 404s. In such case if we allow
+                    // V to go thru here, onDrainVideoQueue will update
+                    // mLastReceivedVideoSampleUs.
+                    // Then mLastReceivedVideoSampleUs > A TS and the following
+                    // audio samples will be dropped.
                     if (!mDrainVideoQueuePendingUntilFirstAudio) {
                         mDrainVideoQueuePendingUntilFirstAudio = true;
                     }
@@ -640,7 +651,6 @@ void DashPlayer::Renderer::onDrainVideoQueue() {
         }
     } else {
         DPR_MSG_ERROR("rendering video at media time %.2f secs", (double)mediaTimeUs / 1E6);
-
         if(mStats != NULL) {
             mStats->recordOnTime(realTimeUs,nowUs,mVideoLateByUs);
             mStats->incrementTotalRenderingFrames();
@@ -1002,7 +1012,7 @@ void DashPlayer::Renderer::onResume() {
 
     mPaused = false;
 
-    if (mIsLiveStream) {
+    if (mIsLiveStream && mLookAheadWindowMode) {
         signalRefreshAnchorRealTime(false);
     }
 
@@ -1038,8 +1048,19 @@ status_t DashPlayer::Renderer::setMediaPresence(bool audio, bool bValue)
 }
 
 void DashPlayer::Renderer::setLiveStream(bool bLiveStream) {
+    Mutex::Autolock autoLock(mRendererDataLock);
     DPR_MSG_HIGH("mIsLiveStream set to %d", bLiveStream);
     mIsLiveStream = bLiveStream;
+}
+
+void DashPlayer::Renderer::setLookAheadWindowMode(bool bLookAheadWindowMode) {
+  {
+    Mutex::Autolock autoLock(mRendererDataLock);
+    if (mLookAheadWindowMode != bLookAheadWindowMode) {
+        DPR_MSG_HIGH("mLookAheadWindowMode set to %d from %d", bLookAheadWindowMode, mLookAheadWindowMode);
+        mLookAheadWindowMode = bLookAheadWindowMode;
+    }
+  }
 }
 
 }  // namespace android
