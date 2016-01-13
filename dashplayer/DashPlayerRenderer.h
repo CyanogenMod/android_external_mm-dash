@@ -57,6 +57,8 @@ struct DashPlayer::Renderer : public AHandler {
 
     void signalRefreshAnchorRealTime(bool bAddStartUpLatency);
 
+    void setLookAheadWindowMode(bool bLookAheadWindowMode);
+
 protected:
     virtual ~Renderer();
 
@@ -152,14 +154,13 @@ private:
     int mLogLevel;
 
     int64_t mLastReceivedVideoSampleUs;
-    Mutex mDelayLock;
     bool mDelayPending;
     int64_t mDelayToQueueUs;
     int64_t mDelayToQueueTimeRealUs;
 
     bool mIsLiveStream;
 
-    Mutex mRefreshAnchorTimeLock;
+    Mutex mRendererDataLock;
 
     int64_t mStartUpLatencyBeginUs;
     int64_t mStartUpLatencyUs;
@@ -167,6 +168,8 @@ private:
     bool mDiscFromAnchorRealTimeRefresh;
 
     int64_t mLastRenderedTimeMediaUs;
+
+    bool mLookAheadWindowMode;
 
     DISALLOW_EVIL_CONSTRUCTORS(Renderer);
 };
