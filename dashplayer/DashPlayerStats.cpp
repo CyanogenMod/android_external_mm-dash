@@ -93,7 +93,9 @@ void DashPlayerStats::setMime(const char* mime) {
         }
 
         mMIME = new char[mimeLen+1];
-        strlcpy(mMIME,mime,mimeLen+1);
+        if (mMIME != NULL) {
+            strlcpy(mMIME,mime,mimeLen+1);
+        }
     }
 }
 
