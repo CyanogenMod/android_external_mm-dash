@@ -87,14 +87,14 @@ void DashPlayerStats::setMime(const char* mime) {
     Mutex::Autolock autoLock(mStatsLock);
     if(mime != NULL) {
         int mimeLen = (int)strlen(mime);
-        if(mMIME) {
-          delete[] mMIME;
-          mMIME = NULL;
-        }
-
-        mMIME = new char[mimeLen+1];
-        if (mMIME != NULL && mimeLen > 0) {
-            strlcpy(mMIME,mime,mimeLen+1);
+        if (mimeLen > 0)
+        {
+          if (mMIME) {
+            delete[] mMIME;
+            mMIME = NULL;
+          }
+          mMIME = new char[mimeLen+1];
+          strlcpy(mMIME,mime,mimeLen+1);
         }
     }
 }

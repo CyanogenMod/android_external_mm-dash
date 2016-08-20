@@ -2001,7 +2001,7 @@ void DashPlayer::renderBuffer(bool audio, const sp<AMessage> &msg) {
                         }
                       }
                     }
-                    pExtra = (OMX_OTHER_EXTRADATATYPE *) (((OMX_U8 *) pExtra) + pExtra->nSize);
+                    pExtra = (OMX_OTHER_EXTRADATATYPE *) (((OMX_U8 *) pExtra) + ((pExtra->nSize + 3) & (~3)));
                   }
                   graphicBuffer->unlock();
                 }
